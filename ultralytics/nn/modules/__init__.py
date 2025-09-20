@@ -7,14 +7,14 @@ blocks, attention mechanisms, transformer components, and detection/segmentation
 
 Examples:
     Visualize a module with Netron
-    >>> from ultralytics.nn.modules import Conv
+    >>> from ultralytics.nn.modules import *
     >>> import torch
-    >>> import subprocess
+    >>> import os
     >>> x = torch.ones(1, 128, 40, 40)
     >>> m = Conv(128, 128)
     >>> f = f"{m._get_name()}.onnx"
     >>> torch.onnx.export(m, x, f)
-    >>> subprocess.run(f"onnxslim {f} {f} && open {f}", shell=True, check=True)  # pip install onnxslim
+    >>> os.system(f"onnxslim {f} {f} && open {f}")  # pip install onnxslim
 """
 
 from .block import (
@@ -27,17 +27,21 @@ from .block import (
     DFL,
     ELAN1,
     PSA,
+    QPSA,
     SPP,
     SPPELAN,
     SPPF,
+    QSPPF,
     A2C2f,
     AConv,
     ADown,
     Attention,
     BNContrastiveHead,
     Bottleneck,
+    QBottleneck,
     BottleneckCSP,
     C2f,
+    QC2f,
     C2fAttn,
     C2fCIB,
     C2fPSA,
@@ -58,6 +62,7 @@ from .block import (
     RepVGGDW,
     ResNetLayer,
     SCDown,
+    QSCDown,
     TorchVision,
 )
 from .conv import (
@@ -65,6 +70,7 @@ from .conv import (
     ChannelAttention,
     Concat,
     Conv,
+    QConv,
     Conv2,
     ConvTranspose,
     DWConv,
@@ -104,6 +110,7 @@ from .transformer import (
 
 __all__ = (
     "Conv",
+    "QConv",
     "Conv2",
     "LightConv",
     "RepConv",
@@ -125,12 +132,15 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "QSPPF",
     "C1",
     "C2",
     "C3",
     "C2f",
+    "QC2f",
     "C3k2",
     "SCDown",
+    "QSCDown",
     "C2fPSA",
     "C2PSA",
     "C2fAttn",
@@ -139,6 +149,7 @@ __all__ = (
     "C3Ghost",
     "GhostBottleneck",
     "Bottleneck",
+    "QBottleneck",
     "BottleneckCSP",
     "Proto",
     "Detect",

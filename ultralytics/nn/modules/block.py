@@ -1,16 +1,17 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Block modules."""
 
-from __future__ import annotations
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import Conv, QConv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
+
+from torch.quantization import QuantStub, DeQuantStub
 
 __all__ = (
     "DFL",
@@ -18,10 +19,12 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "QSPPF",
     "C1",
     "C2",
     "C3",
     "C2f",
+    "QC2f",
     "C2fAttn",
     "ImagePoolingAttn",
     "ContrastiveHead",
@@ -31,6 +34,7 @@ __all__ = (
     "C3Ghost",
     "GhostBottleneck",
     "Bottleneck",
+    "QBottleneck",
     "BottleneckCSP",
     "Proto",
     "RepC3",
@@ -50,7 +54,9 @@ __all__ = (
     "C2fCIB",
     "Attention",
     "PSA",
+    "QPSA",
     "SCDown",
+    "QSCDown",
     "TorchVision",
 )
 
@@ -192,7 +198,7 @@ class HGBlock(nn.Module):
 class SPP(nn.Module):
     """Spatial Pyramid Pooling (SPP) layer https://arxiv.org/abs/1406.4729."""
 
-    def __init__(self, c1: int, c2: int, k: tuple[int, ...] = (5, 9, 13)):
+    def __init__(self, c1: int, c2: int, k: Tuple[int, ...] = (5, 9, 13)):
         """
         Initialize the SPP layer with input/output channels and pooling kernel sizes.
 
@@ -471,7 +477,7 @@ class Bottleneck(nn.Module):
     """Standard bottleneck."""
 
     def __init__(
-        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5
     ):
         """
         Initialize a standard bottleneck module.
@@ -711,7 +717,7 @@ class ImagePoolingAttn(nn.Module):
     """ImagePoolingAttn: Enhance the text embeddings with image-aware information."""
 
     def __init__(
-        self, ec: int = 256, ch: tuple[int, ...] = (), ct: int = 512, nh: int = 8, k: int = 3, scale: bool = False
+        self, ec: int = 256, ch: Tuple[int, ...] = (), ct: int = 512, nh: int = 8, k: int = 3, scale: bool = False
     ):
         """
         Initialize ImagePoolingAttn module.
@@ -740,12 +746,12 @@ class ImagePoolingAttn(nn.Module):
         self.hc = ec // nh
         self.k = k
 
-    def forward(self, x: list[torch.Tensor], text: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: List[torch.Tensor], text: torch.Tensor) -> torch.Tensor:
         """
         Forward pass of ImagePoolingAttn.
 
         Args:
-            x (list[torch.Tensor]): List of input feature maps.
+            x (List[torch.Tensor]): List of input feature maps.
             text (torch.Tensor): Text embeddings.
 
         Returns:
@@ -856,7 +862,7 @@ class RepBottleneck(Bottleneck):
     """Rep bottleneck."""
 
     def __init__(
-        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5
     ):
         """
         Initialize RepBottleneck.
@@ -1026,13 +1032,13 @@ class SPPELAN(nn.Module):
 class CBLinear(nn.Module):
     """CBLinear."""
 
-    def __init__(self, c1: int, c2s: list[int], k: int = 1, s: int = 1, p: int | None = None, g: int = 1):
+    def __init__(self, c1: int, c2s: List[int], k: int = 1, s: int = 1, p: Optional[int] = None, g: int = 1):
         """
         Initialize CBLinear module.
 
         Args:
             c1 (int): Input channels.
-            c2s (list[int]): List of output channel sizes.
+            c2s (List[int]): List of output channel sizes.
             k (int): Kernel size.
             s (int): Stride.
             p (int | None): Padding.
@@ -1042,7 +1048,7 @@ class CBLinear(nn.Module):
         self.c2s = c2s
         self.conv = nn.Conv2d(c1, sum(c2s), k, s, autopad(k, p), groups=g, bias=True)
 
-    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Forward pass through CBLinear layer."""
         return self.conv(x).split(self.c2s, dim=1)
 
@@ -1050,22 +1056,22 @@ class CBLinear(nn.Module):
 class CBFuse(nn.Module):
     """CBFuse."""
 
-    def __init__(self, idx: list[int]):
+    def __init__(self, idx: List[int]):
         """
         Initialize CBFuse module.
 
         Args:
-            idx (list[int]): Indices for feature selection.
+            idx (List[int]): Indices for feature selection.
         """
         super().__init__()
         self.idx = idx
 
-    def forward(self, xs: list[torch.Tensor]) -> torch.Tensor:
+    def forward(self, xs: List[torch.Tensor]) -> torch.Tensor:
         """
         Forward pass through CBFuse layer.
 
         Args:
-            xs (list[torch.Tensor]): List of input tensors.
+            xs (List[torch.Tensor]): List of input tensors.
 
         Returns:
             (torch.Tensor): Fused output tensor.
@@ -1676,7 +1682,7 @@ class TorchVision(nn.Module):
             x (torch.Tensor): Input tensor.
 
         Returns:
-            (torch.Tensor | list[torch.Tensor]): Output tensor or list of tensors.
+            (torch.Tensor | List[torch.Tensor]): Output tensor or list of tensors.
         """
         if self.split:
             y = [x]
@@ -1921,7 +1927,7 @@ class A2C2f(nn.Module):
         y.extend(m(y[-1]) for m in self.m)
         y = self.cv2(torch.cat(y, 1))
         if self.gamma is not None:
-            return x + self.gamma.view(-1, self.gamma.shape[0], 1, 1) * y
+            return x + self.gamma.view(-1, len(self.gamma), 1, 1) * y
         return y
 
 
@@ -1974,12 +1980,12 @@ class Residual(nn.Module):
 class SAVPE(nn.Module):
     """Spatial-Aware Visual Prompt Embedding module for feature enhancement."""
 
-    def __init__(self, ch: list[int], c3: int, embed: int):
+    def __init__(self, ch: List[int], c3: int, embed: int):
         """
         Initialize SAVPE module with channels, intermediate channels, and embedding dimension.
 
         Args:
-            ch (list[int]): List of input channel dimensions.
+            ch (List[int]): List of input channel dimensions.
             c3 (int): Intermediate channels.
             embed (int): Embedding dimension.
         """
@@ -2002,7 +2008,7 @@ class SAVPE(nn.Module):
         self.cv5 = nn.Conv2d(1, self.c, 3, padding=1)
         self.cv6 = nn.Sequential(Conv(2 * self.c, self.c, 3), nn.Conv2d(self.c, self.c, 3, padding=1))
 
-    def forward(self, x: list[torch.Tensor], vp: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: List[torch.Tensor], vp: torch.Tensor) -> torch.Tensor:
         """Process input features and visual prompts to generate enhanced embeddings."""
         y = [self.cv2[i](xi) for i, xi in enumerate(x)]
         y = self.cv4(torch.cat(y, dim=1))
@@ -2025,7 +2031,269 @@ class SAVPE(nn.Module):
         vp = vp.reshape(B, Q, 1, -1)
 
         score = y * vp + torch.logical_not(vp) * torch.finfo(y.dtype).min
-        score = F.softmax(score, dim=-1).to(y.dtype)
+
+        score = F.softmax(score, dim=-1, dtype=torch.float).to(score.dtype)
+
         aggregated = score.transpose(-2, -3) @ x.reshape(B, self.c, C // self.c, -1).transpose(-1, -2)
 
         return F.normalize(aggregated.transpose(-2, -3).reshape(B, Q, -1), dim=-1, p=2)
+
+class QBottleneck(nn.Module):
+    """Standard bottleneck."""
+
+    def __init__(
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5, q: bool = True
+    ):
+        """
+        Initialize a standard bottleneck module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use shortcut connection.
+            g (int): Groups for convolutions.
+            k (tuple): Kernel sizes for convolutions.
+            e (float): Expansion ratio.
+            q (bool): Whether to quantize 
+        """
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = QConv(c1, c_, k[0], 1)
+        self.cv2 = QConv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply bottleneck with optional shortcut connection."""
+        if self.q:
+          x = self.quant(x)
+
+        if self.add:
+            x = x + self.cv2(self.cv1(x))
+        else: 
+            x = self.cv2(self.cv1(x))
+
+        if self.q:
+            x = self.dequant(x)
+        
+        return x 
+
+
+class QC2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, q: bool = True):
+        """
+        Initialize a CSP bottleneck with 2 convolutions.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+            q (bool): Whether to quantize
+        """
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = QConv(c1, 2 * self.c, 1, 1)
+        self.cv2 = QConv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through C2f layer."""
+        if self.q:
+          x = self.quant(x)
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        y = self.cv2(torch.cat(y, 1))
+        if self.q:
+            y = self.dequant(y)
+        return y
+
+    def forward_split(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass using split() instead of chunk()."""
+        if self.q:
+            x = self.quant(x)
+        y = self.cv1(x).split((self.c, self.c), 1)
+        y = [y[0], y[1]]
+        y.extend(m(y[-1]) for m in self.m)
+        y = self.cv2(torch.cat(y, 1))
+        if self.q:
+            y = self.dequant(y)
+        return y
+    
+class QSCDown(nn.Module):
+    """
+    SCDown module for downsampling with separable convolutions.
+
+    This module performs downsampling using a combination of pointwise and depthwise convolutions, which helps in
+    efficiently reducing the spatial dimensions of the input tensor while maintaining the channel information.
+
+    Attributes:
+        cv1 (Conv): Pointwise convolution layer that reduces the number of channels.
+        cv2 (Conv): Depthwise convolution layer that performs spatial downsampling.
+
+    Methods:
+        forward: Applies the SCDown module to the input tensor.
+
+    Examples:
+        >>> import torch
+        >>> from ultralytics import SCDown
+        >>> model = SCDown(c1=64, c2=128, k=3, s=2)
+        >>> x = torch.randn(1, 64, 128, 128)
+        >>> y = model(x)
+        >>> print(y.shape)
+        torch.Size([1, 128, 64, 64])
+    """
+
+    def __init__(self, c1: int, c2: int, k: int, s: int, q: bool = True):
+        """
+        Initialize SCDown module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            k (int): Kernel size.
+            s (int): Stride.
+        """
+        super().__init__()
+        self.cv1 = QConv(c1, c2, 1, 1)
+        self.cv2 = QConv(c2, c2, k=k, s=s, g=c2, act=False)
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply convolution and downsampling to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Downsampled output tensor.
+        """
+        if self.q:
+            x = self.quant(x)
+
+        x = self.cv2(self.cv1(x))
+
+        if self.q:
+            x = self.dequant(x)
+
+        return x
+    
+class QSPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
+
+    def __init__(self, c1: int, c2: int, k: int = 5, q: bool = True):
+        """
+        Initialize the SPPF layer with given input/output channels and kernel size.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            k (int): Kernel size.
+
+        Notes:
+            This module is equivalent to SPP(k=(5, 9, 13)).
+        """
+        super().__init__()
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = QConv(c1, c_, 1, 1)
+        self.cv2 = QConv(c_ * 4, c2, 1, 1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply sequential pooling operations to input and return concatenated feature maps."""
+        if self.q:
+            x = self.quant(x)
+
+        y = [self.cv1(x)]
+        y.extend(self.m(y[-1]) for _ in range(3))
+        y = self.cv2(torch.cat(y, 1))
+
+        if self.q:
+            y = self.dequant(y)
+        return y
+    
+class QPSA(nn.Module):
+    """
+    PSA class for implementing Position-Sensitive Attention in neural networks.
+
+    This class encapsulates the functionality for applying position-sensitive attention and feed-forward networks to
+    input tensors, enhancing feature extraction and processing capabilities.
+
+    Attributes:
+        c (int): Number of hidden channels after applying the initial convolution.
+        cv1 (Conv): 1x1 convolution layer to reduce the number of input channels to 2*c.
+        cv2 (Conv): 1x1 convolution layer to reduce the number of output channels to c.
+        attn (Attention): Attention module for position-sensitive attention.
+        ffn (nn.Sequential): Feed-forward network for further processing.
+
+    Methods:
+        forward: Applies position-sensitive attention and feed-forward network to the input tensor.
+
+    Examples:
+        Create a PSA module and apply it to an input tensor
+        >>> psa = PSA(c1=128, c2=128, e=0.5)
+        >>> input_tensor = torch.randn(1, 128, 64, 64)
+        >>> output_tensor = psa.forward(input_tensor)
+    """
+
+    def __init__(self, c1: int, c2: int, e: float = 0.5, q: bool = True):
+        """
+        Initialize PSA module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        assert c1 == c2
+        self.c = int(c1 * e)
+        self.cv1 = QConv(c1, 2 * self.c, 1, 1)
+        self.cv2 = QConv(2 * self.c, c1, 1)
+
+        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
+        self.ffn = nn.Sequential(QConv(self.c, self.c * 2, 1), QConv(self.c * 2, self.c, 1, act=False))
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Execute forward pass in PSA module.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after attention and feed-forward processing.
+        """
+        if self.q:
+            x = self.quant(x)
+        a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        b = b + self.attn(b)
+        b = b + self.ffn(b)
+        b = self.cv2(torch.cat((a, b), 1))
+        if self.q:
+            b = self.dequant(b)
+        return b
