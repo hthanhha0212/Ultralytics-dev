@@ -125,7 +125,7 @@ class BaseModel(torch.nn.Module):
         >>> model = BaseModel()
         >>> model.info()  # Display model information
     """
-    def __init__(self, q_glob: bool= True):
+    def __init__(self, q_glob: bool= False):
         super().__init__()
         self.q = q_glob
         if self.q:
@@ -441,7 +441,7 @@ class DetectionModel(BaseModel):
         >>> results = model.predict(image_tensor)
     """
 
-    def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True):
+    def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True, q= False):
         """
         Initialize the YOLO detection model with the given config and parameters.
 
@@ -451,7 +451,7 @@ class DetectionModel(BaseModel):
             nc (int, optional): Number of classes.
             verbose (bool): Whether to display model information.
         """
-        super().__init__()
+        super().__init__(q_glob=q)
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
         if self.yaml["backbone"][0][2] == "Silence":
             LOGGER.warning(
