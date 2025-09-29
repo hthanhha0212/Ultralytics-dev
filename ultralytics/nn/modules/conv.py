@@ -48,7 +48,8 @@ class Conv(nn.Module):
         default_act (nn.Module): Default activation function (SiLU).
     """
 
-    default_act = nn.SiLU()  # default activation
+    #default_act = nn.SiLU()  # default activation
+    default_act = nn.ReLU()  # default activation
 
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         """
@@ -106,7 +107,7 @@ class QConv(nn.Module):
 
     default_act = nn.ReLU()  # default activation
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, q=True):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         """
         Initialize Conv layer with given parameters.
 
@@ -124,10 +125,8 @@ class QConv(nn.Module):
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x):
         """
@@ -139,13 +138,11 @@ class QConv(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        if self.q:
-          x = self.quant(x)
-        x = self.conv(x)
-        x = self.bn(x)
-        x = self.act(x)
-        if self.q:
-          x = self.dequant(x)
+        x = self.quant(x)
+
+        x = self.act(self.bn(self.conv(x)))
+
+        x = self.dequant(x)
         return x
 
     def forward_fuse(self, x):
@@ -158,12 +155,9 @@ class QConv(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        if self.q:
-          x = self.quant(x)
-        x = self.conv(x)
-        x = self.act(x)
-        if self.q:
-          x = self.dequant(x)
+        x = self.quant(x)
+        x = self.act(self.conv(x))
+        x = self.dequant(x)
         return x
 
 class Conv2(Conv):

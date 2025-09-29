@@ -12,6 +12,8 @@ from .conv import Conv, QConv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 from torch.quantization import QuantStub, DeQuantStub
+from torch.nn.quantized import FloatFunctional
+from torch.ao.nn.quantized.modules.activation import Softmax
 
 __all__ = (
     "DFL",
@@ -80,12 +82,16 @@ class DFL(nn.Module):
         x = torch.arange(c1, dtype=torch.float)
         self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
         self.c1 = c1
+        self.sm = Softmax(dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         b, _, a = x.shape  # batch, channels, anchors
-        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
-        # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
+        if (x.dtype == torch.float32):
+            return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+            # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
+        else:
+            return self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
 
 
 class Proto(nn.Module):
@@ -495,10 +501,13 @@ class Bottleneck(nn.Module):
         self.cv1 = Conv(c1, c_, k[0], 1)
         self.cv2 = Conv(c_, c2, k[1], 1, g=g)
         self.add = shortcut and c1 == c2
+        self.add_fn = FloatFunctional()
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        return self.add_fn.add(x, self.cv2(self.cv1(x))) if self.add else self.cv2(self.cv1(x))
+        #return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class BottleneckCSP(nn.Module):
@@ -1170,7 +1179,7 @@ class RepVGGDW(torch.nn.Module):
         self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False)
         self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False)
         self.dim = ed
-        self.act = nn.SiLU()
+        self.act = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1257,6 +1266,7 @@ class CIB(nn.Module):
         )
 
         self.add = shortcut and c1 == c2
+        self.add_fn = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1268,7 +1278,7 @@ class CIB(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        return x + self.cv1(x) if self.add else self.cv1(x)
+        return self.add_fn.add(x, self.cv1(x)) if self.add else self.cv1(x)
 
 
 class C2fCIB(C2f):
@@ -1342,6 +1352,8 @@ class Attention(nn.Module):
         self.qkv = Conv(dim, h, 1, act=False)
         self.proj = Conv(dim, dim, 1, act=False)
         self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
+        self.mul_fn = FloatFunctional()
+        self.sm = Softmax(dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1359,10 +1371,15 @@ class Attention(nn.Module):
         q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
-
-        attn = (q.transpose(-2, -1) @ k) * self.scale
-        attn = attn.softmax(dim=-1)
-        x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        #attn = (q.transpose(-2, -1) @ k) * self.scale
+        amul = self.mul_fn.matmul(q.transpose(-2, -1), k)
+        attn = self.mul_fn.mul_scalar(amul, self.scale)
+        if (attn.dtype != torch.float32):
+            attn = self.sm(attn)
+        else:
+            attn = attn.softmax(dim=-1)
+        x = self.mul_fn.matmul(v, attn.transpose(-2, -1)).view(B, C, H, W)
+        x = self.mul_fn.add(x, self.pe(v.reshape(B, C, H, W)))
         x = self.proj(x)
         return x
 
@@ -1461,6 +1478,7 @@ class PSA(nn.Module):
 
         self.attn = Attention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
         self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
+        self.fl = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1473,8 +1491,10 @@ class PSA(nn.Module):
             (torch.Tensor): Output tensor after attention and feed-forward processing.
         """
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
-        b = b + self.attn(b)
-        b = b + self.ffn(b)
+        #b = b + self.attn(b)
+        #b = b + self.ffn(b)
+        b = self.fl.add(b, self.attn(b))
+        b = self.fl.add(b, self.ffn(b))
         return self.cv2(torch.cat((a, b), 1))
 
 
@@ -2042,7 +2062,7 @@ class QBottleneck(nn.Module):
     """Standard bottleneck."""
 
     def __init__(
-        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5, q: bool = True
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5
     ):
         """
         Initialize a standard bottleneck module.
@@ -2061,32 +2081,28 @@ class QBottleneck(nn.Module):
         self.cv1 = QConv(c1, c_, k[0], 1)
         self.cv2 = QConv(c_, c2, k[1], 1, g=g)
         self.add = shortcut and c1 == c2
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.add_fn = FloatFunctional()
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
-        if self.q:
-          x = self.quant(x)
+        x = self.quant(x)
 
         if self.add:
-            x = x + self.cv2(self.cv1(x))
+            self.add_fn.add(x, self.cv2(self.cv1(x)))
         else: 
             x = self.cv2(self.cv1(x))
 
-        if self.q:
-            x = self.dequant(x)
-        
+        x = self.dequant(x)
         return x 
 
 
 class QC2f(nn.Module):
     """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, q: bool = True):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
         """
         Initialize a CSP bottleneck with 2 convolutions.
 
@@ -2104,32 +2120,26 @@ class QC2f(nn.Module):
         self.cv1 = QConv(c1, 2 * self.c, 1, 1)
         self.cv2 = QConv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through C2f layer."""
-        if self.q:
-          x = self.quant(x)
+        x = self.quant(x)
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
         y = self.cv2(torch.cat(y, 1))
-        if self.q:
-            y = self.dequant(y)
+        y = self.dequant(y)
         return y
 
     def forward_split(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass using split() instead of chunk()."""
-        if self.q:
-            x = self.quant(x)
+        x = self.quant(x)
         y = self.cv1(x).split((self.c, self.c), 1)
         y = [y[0], y[1]]
         y.extend(m(y[-1]) for m in self.m)
         y = self.cv2(torch.cat(y, 1))
-        if self.q:
-            y = self.dequant(y)
+        y = self.dequant(y)
         return y
     
 class QSCDown(nn.Module):

@@ -98,7 +98,7 @@ from ultralytics.utils.torch_utils import (
     smart_inference_mode,
     time_sync,
 )
-
+from torch.ao.quantization import QuantStub, DeQuantStub
 
 class BaseModel(torch.nn.Module):
     """
@@ -125,6 +125,12 @@ class BaseModel(torch.nn.Module):
         >>> model = BaseModel()
         >>> model.info()  # Display model information
     """
+    def __init__(self, q_glob: bool= True):
+        super().__init__()
+        self.q = q_glob
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x, *args, **kwargs):
         """
@@ -160,8 +166,65 @@ class BaseModel(torch.nn.Module):
         """
         if augment:
             return self._predict_augment(x)
+        if self.q:
+            return self._predict_once_q_glob(x, profile, visualize, embed)
         return self._predict_once(x, profile, visualize, embed)
 
+    def _predict_once_q_glob(self, x, profile=False, visualize=False, embed=None):
+        """
+        Perform a forward pass through the network.
+
+        Args:
+            x (torch.Tensor): The input tensor to the model.
+            profile (bool): Print the computation time of each layer if True.
+            visualize (bool): Save the feature maps of the model if True.
+            embed (list, optional): A list of feature vectors/embeddings to return.
+
+        Returns:
+            (torch.Tensor): The last output of the model.
+        """
+        y, dt, embeddings = [], [], []  # outputs
+        embed = frozenset(embed) if embed is not None else {-1}
+        max_idx = max(embed)
+        for m in self.model:
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            if profile:
+                self._profile_one_layer(m, x, dt)
+            #print("Processing layer:", m.__class__.__name__)
+            
+            if (isinstance(m, Concat)):
+                x = [self.quant(item) for item in x]
+                x = m(x)
+                x = self.dequant(x)
+
+            elif (isinstance(m, v10Detect)):
+                x = m(x)
+            #elif (isinstance(m, v10Detect)):
+            #    x = [self.quant(item) for item in x]
+            #    x = m(x)
+            #    if (isinstance(x, tuple)):
+            #        x = list(x)
+            #        x[0] = self.dequant(x[0])
+            #        x[1]['one2one'] = [self.dequant(item) for item in x[1]['one2one']]
+            #        x[1]['one2many'] = [self.dequant(item) for item in x[1]['one2many']]
+            #        x = tuple(x)
+            #    else:
+            #        x['one2one'] = [self.dequant(item) for item in x['one2one']]
+            #        x['one2many'] = [self.dequant(item) for item in x['one2many']]
+            else:
+                x = self.quant(x)
+                x = m(x)  # run 
+                x = self.dequant(x)
+            y.append(x if m.i in self.save else None)  # save output
+            if visualize:
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
+            if m.i in embed:
+                embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
+                if m.i == max_idx:
+                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
+        return x
+    
     def _predict_once(self, x, profile=False, visualize=False, embed=None):
         """
         Perform a forward pass through the network.
@@ -192,7 +255,7 @@ class BaseModel(torch.nn.Module):
                 if m.i == max_idx:
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
         return x
-
+    
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
         LOGGER.warning(
