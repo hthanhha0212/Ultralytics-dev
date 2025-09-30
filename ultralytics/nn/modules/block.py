@@ -2294,7 +2294,7 @@ class QAttention(nn.Module):
         amul = self.mul_fn.matmul(q.transpose(-2, -1), k)
         attn = self.mul_fn.mul_scalar(amul, self.scale)
 
-        if (attn.dtype != torch.float32):
+        if (attn.dtype == torch.quint8):
             attn = self.sm(attn)
         else:
             attn = attn.softmax(dim=-1)
