@@ -1685,6 +1685,7 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            QC2f,
             C3k2,
             C2fAttn,
             C3,
@@ -1694,6 +1695,7 @@ def parse_model(d, ch, verbose=True):
             RepC3,
             C2fPSA,
             C2fCIB,
+            QC2fCIB,
             C2PSA,
             A2C2f,
         }
