@@ -247,7 +247,7 @@ class BaseModel(torch.nn.Module):
         embed = frozenset(embed) if embed is not None else {-1}
         max_idx = max(embed)
         for m in self.model:
-            print("Processing layer:", m.__class__.__name__)
+            #print("Processing layer:", m.__class__.__name__)
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
