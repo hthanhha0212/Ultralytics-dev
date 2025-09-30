@@ -36,6 +36,7 @@ from ultralytics.nn.modules import (
     QC2f,
     C2fAttn,
     C2fCIB,
+    QC2fCIB,
     C2fPSA,
     C3Ghost,
     C3k2,
@@ -44,11 +45,13 @@ from ultralytics.nn.modules import (
     CBLinear,
     Classify,
     Concat,
+    QConcat,
     Conv,
     QConv,
     Conv2,
     ConvTranspose,
     Detect,
+    QDetect,
     DWConv,
     DWConvTranspose2d,
     Focus,
@@ -64,6 +67,7 @@ from ultralytics.nn.modules import (
     RepConv,
     RepNCSPELAN4,
     RepVGGDW,
+    QRepVGGDW,
     ResNetLayer,
     RTDETRDecoder,
     SCDown,
@@ -74,6 +78,7 @@ from ultralytics.nn.modules import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+    Qv10Detect,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -242,6 +247,7 @@ class BaseModel(torch.nn.Module):
         embed = frozenset(embed) if embed is not None else {-1}
         max_idx = max(embed)
         for m in self.model:
+            print("Processing layer:", m.__class__.__name__)
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
@@ -1669,6 +1675,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             QSCDown,
             C2fCIB,
+            QC2fCIB,
             A2C2f,
         }
     )
@@ -1738,10 +1745,10 @@ def parse_model(d, ch, verbose=True):
             c2 = args[1] if args[3] else args[1] * 4
         elif m is torch.nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is Concat:
+        elif m is Concat or m is QConcat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
+            {Detect, QDetect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, Qv10Detect}
         ):
             args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:

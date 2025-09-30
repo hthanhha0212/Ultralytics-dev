@@ -11,12 +11,13 @@ from ultralytics.utils.torch_utils import fuse_conv_and_bn
 from .conv import Conv, QConv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
-from torch.quantization import QuantStub, DeQuantStub
+from torch.ao.quantization import QuantStub, DeQuantStub
 from torch.nn.quantized import FloatFunctional
 from torch.ao.nn.quantized.modules.activation import Softmax
 
 __all__ = (
     "DFL",
+    "QDFL",
     "HGBlock",
     "HGStem",
     "SPP",
@@ -52,9 +53,13 @@ __all__ = (
     "C2fPSA",
     "C2PSA",
     "RepVGGDW",
+    "QRepVGGDW",
     "CIB",
+    "QCIB",
     "C2fCIB",
+    "QC2fCIB",
     "Attention",
+    "QAttention",
     "PSA",
     "QPSA",
     "SCDown",
@@ -483,7 +488,7 @@ class Bottleneck(nn.Module):
     """Standard bottleneck."""
 
     def __init__(
-        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
     ):
         """
         Initialize a standard bottleneck module.
@@ -501,13 +506,10 @@ class Bottleneck(nn.Module):
         self.cv1 = Conv(c1, c_, k[0], 1)
         self.cv2 = Conv(c_, c2, k[1], 1, g=g)
         self.add = shortcut and c1 == c2
-        self.add_fn = FloatFunctional()
-        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
-        return self.add_fn.add(x, self.cv2(self.cv1(x))) if self.add else self.cv2(self.cv1(x))
-        #return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class BottleneckCSP(nn.Module):
@@ -1266,7 +1268,6 @@ class CIB(nn.Module):
         )
 
         self.add = shortcut and c1 == c2
-        self.add_fn = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1278,7 +1279,7 @@ class CIB(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        return self.add_fn.add(x, self.cv1(x)) if self.add else self.cv1(x)
+        return x + self.cv1(x) if self.add else self.cv1(x)
 
 
 class C2fCIB(C2f):
@@ -1352,8 +1353,6 @@ class Attention(nn.Module):
         self.qkv = Conv(dim, h, 1, act=False)
         self.proj = Conv(dim, dim, 1, act=False)
         self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
-        self.mul_fn = FloatFunctional()
-        self.sm = Softmax(dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1371,15 +1370,10 @@ class Attention(nn.Module):
         q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
-        #attn = (q.transpose(-2, -1) @ k) * self.scale
-        amul = self.mul_fn.matmul(q.transpose(-2, -1), k)
-        attn = self.mul_fn.mul_scalar(amul, self.scale)
-        if (attn.dtype != torch.float32):
-            attn = self.sm(attn)
-        else:
-            attn = attn.softmax(dim=-1)
-        x = self.mul_fn.matmul(v, attn.transpose(-2, -1)).view(B, C, H, W)
-        x = self.mul_fn.add(x, self.pe(v.reshape(B, C, H, W)))
+
+        attn = (q.transpose(-2, -1) @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+        x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
         x = self.proj(x)
         return x
 
@@ -1478,7 +1472,6 @@ class PSA(nn.Module):
 
         self.attn = Attention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
         self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
-        self.fl = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1491,10 +1484,8 @@ class PSA(nn.Module):
             (torch.Tensor): Output tensor after attention and feed-forward processing.
         """
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
-        #b = b + self.attn(b)
-        #b = b + self.ffn(b)
-        b = self.fl.add(b, self.attn(b))
-        b = self.fl.add(b, self.ffn(b))
+        b = b + self.attn(b)
+        b = b + self.ffn(b)
         return self.cv2(torch.cat((a, b), 1))
 
 
@@ -2078,24 +2069,14 @@ class QBottleneck(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = QConv(c1, c_, k[0], 1)
-        self.cv2 = QConv(c_, c2, k[1], 1, g=g)
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
         self.add = shortcut and c1 == c2
-        self.add_fn = FloatFunctional()
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
-
+        self.fl_func = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
-        x = self.quant(x)
-
-        if self.add:
-            self.add_fn.add(x, self.cv2(self.cv1(x)))
-        else: 
-            x = self.cv2(self.cv1(x))
-
-        x = self.dequant(x)
+        x = self.fl_func.add(x, self.cv2(self.cv1(x))) if self.add else self.cv2(self.cv1(x))
         return x 
 
 
@@ -2117,8 +2098,8 @@ class QC2f(nn.Module):
         """
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
-        self.cv1 = QConv(c1, 2 * self.c, 1, 1)
-        self.cv2 = QConv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -2128,7 +2109,16 @@ class QC2f(nn.Module):
         x = self.quant(x)
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
-        y = self.cv2(torch.cat(y, 1))
+
+        """ Convert all the tensors in the list to float and requantize, 
+        to resolve the quantization parameters mismatching""" 
+        if (y[0].dtype != torch.float32):
+            l = [self.dequant(item) for item in y]
+            y = self.quant(torch.cat(l, 1))
+        else:
+            y = torch.cat(y, 1)
+        
+        y = self.cv2(y)
         y = self.dequant(y)
         return y
 
@@ -2166,7 +2156,7 @@ class QSCDown(nn.Module):
         torch.Size([1, 128, 64, 64])
     """
 
-    def __init__(self, c1: int, c2: int, k: int, s: int, q: bool = True):
+    def __init__(self, c1: int, c2: int, k: int, s: int):
         """
         Initialize SCDown module.
 
@@ -2177,12 +2167,10 @@ class QSCDown(nn.Module):
             s (int): Stride.
         """
         super().__init__()
-        self.cv1 = QConv(c1, c2, 1, 1)
-        self.cv2 = QConv(c2, c2, k=k, s=s, g=c2, act=False)
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.cv1 = Conv(c1, c2, 1, 1)
+        self.cv2 = Conv(c2, c2, k=k, s=s, g=c2, act=False)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2194,20 +2182,16 @@ class QSCDown(nn.Module):
         Returns:
             (torch.Tensor): Downsampled output tensor.
         """
-        if self.q:
-            x = self.quant(x)
-
+        x = self.quant(x)
         x = self.cv2(self.cv1(x))
-
-        if self.q:
-            x = self.dequant(x)
+        x = self.dequant(x)
 
         return x
     
 class QSPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
-    def __init__(self, c1: int, c2: int, k: int = 5, q: bool = True):
+    def __init__(self, c1: int, c2: int, k: int = 5):
         """
         Initialize the SPPF layer with given input/output channels and kernel size.
 
@@ -2221,26 +2205,106 @@ class QSPPF(nn.Module):
         """
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = QConv(c1, c_, 1, 1)
-        self.cv2 = QConv(c_ * 4, c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply sequential pooling operations to input and return concatenated feature maps."""
-        if self.q:
-            x = self.quant(x)
+        x = self.quant(x)
 
         y = [self.cv1(x)]
         y.extend(self.m(y[-1]) for _ in range(3))
-        y = self.cv2(torch.cat(y, 1))
 
-        if self.q:
-            y = self.dequant(y)
+
+        """ Convert all the tensors in the list to float and requantize, 
+        to resolve the quantization parameters mismatching""" 
+        if (y[0].dtype != torch.float32):
+            l = [self.dequant(item) for item in y]
+            y = self.quant(torch.cat(l, 1))
+        else:
+            y = torch.cat(y, 1)
+        
+        # return self.cv2(torch.cat(y, 1))
+        y = self.cv2(y)
+
+        y = self.dequant(y)
         return y
+
+class QAttention(nn.Module):
+    """
+    Attention module that performs self-attention on the input tensor.
+
+    Args:
+        dim (int): The input tensor dimension.
+        num_heads (int): The number of attention heads.
+        attn_ratio (float): The ratio of the attention key dimension to the head dimension.
+
+    Attributes:
+        num_heads (int): The number of attention heads.
+        head_dim (int): The dimension of each attention head.
+        key_dim (int): The dimension of the attention key.
+        scale (float): The scaling factor for the attention scores.
+        qkv (Conv): Convolutional layer for computing the query, key, and value.
+        proj (Conv): Convolutional layer for projecting the attended values.
+        pe (Conv): Convolutional layer for positional encoding.
+    """
+
+    def __init__(self, dim: int, num_heads: int = 8, attn_ratio: float = 0.5):
+        """
+        Initialize multi-head attention module.
+
+        Args:
+            dim (int): Input dimension.
+            num_heads (int): Number of attention heads.
+            attn_ratio (float): Attention ratio for key dimension.
+        """
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.key_dim = int(self.head_dim * attn_ratio)
+        self.scale = self.key_dim**-0.5
+        nh_kd = self.key_dim * num_heads
+        h = dim + nh_kd * 2
+        self.qkv = Conv(dim, h, 1, act=False)
+        self.proj = Conv(dim, dim, 1, act=False)
+        self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
+        self.mul_fn = FloatFunctional()
+        self.sm = Softmax(dim=-1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the Attention module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            (torch.Tensor): The output tensor after self-attention.
+        """
+        B, C, H, W = x.shape
+        N = H * W
+        qkv = self.qkv(x)
+        q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
+            [self.key_dim, self.key_dim, self.head_dim], dim=2
+        )
+
+        amul = self.mul_fn.matmul(q.transpose(-2, -1), k)
+        attn = self.mul_fn.mul_scalar(amul, self.scale)
+
+        if (attn.dtype != torch.float32):
+            attn = self.sm(attn)
+        else:
+            attn = attn.softmax(dim=-1)
+        
+        x = self.mul_fn.matmul(v, attn.transpose(-2, -1)).view(B, C, H, W)
+        x = self.mul_fn.add(x, self.pe(v.reshape(B, C, H, W)))
+
+        x = self.proj(x)
+
+        return x
     
 class QPSA(nn.Module):
     """
@@ -2266,7 +2330,7 @@ class QPSA(nn.Module):
         >>> output_tensor = psa.forward(input_tensor)
     """
 
-    def __init__(self, c1: int, c2: int, e: float = 0.5, q: bool = True):
+    def __init__(self, c1: int, c2: int, e: float = 0.5):
         """
         Initialize PSA module.
 
@@ -2278,15 +2342,14 @@ class QPSA(nn.Module):
         super().__init__()
         assert c1 == c2
         self.c = int(c1 * e)
-        self.cv1 = QConv(c1, 2 * self.c, 1, 1)
-        self.cv2 = QConv(2 * self.c, c1, 1)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv(2 * self.c, c1, 1)
 
-        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
-        self.ffn = nn.Sequential(QConv(self.c, self.c * 2, 1), QConv(self.c * 2, self.c, 1, act=False))
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
+        self.attn = QAttention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
+        self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
+        self.fl = FloatFunctional()
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2298,12 +2361,206 @@ class QPSA(nn.Module):
         Returns:
             (torch.Tensor): Output tensor after attention and feed-forward processing.
         """
-        if self.q:
-            x = self.quant(x)
+        x = self.quant(x)
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
-        b = b + self.attn(b)
-        b = b + self.ffn(b)
-        b = self.cv2(torch.cat((a, b), 1))
-        if self.q:
+        b = self.fl.add(b, self.attn(b))
+        b = self.fl.add(b, self.ffn(b))
+
+        """ Convert all the tensors in the list to float and requantize, 
+        to resolve the quantization parameters mismatching""" 
+        if (b.dtype != torch.float32):
+            a = self.dequant(a)
             b = self.dequant(b)
-        return b
+            r = self.quant(torch.cat((a, b), 1))
+        else:
+            r = torch.cat((a, b), 1)
+        
+        #r = self.cv2(torch.cat((a, b), 1))
+        r = self.cv2(r)
+        r = self.dequant(x)
+        return r
+
+    
+class QRepVGGDW(torch.nn.Module):
+    """RepVGGDW is a class that represents a depth wise separable convolutional block in RepVGG architecture."""
+
+    def __init__(self, ed: int) -> None:
+        """
+        Initialize RepVGGDW module.
+
+        Args:
+            ed (int): Input and output channels.
+        """
+        super().__init__()
+        self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False)
+        self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False)
+        self.dim = ed
+        #self.act = nn.SiLU()
+        self.act = nn.ReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Perform a forward pass of the RepVGGDW block.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after applying the depth wise separable convolution.
+        """
+        return self.act(self.conv(x) + self.conv1(x))
+    
+    def forward_fuse(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Perform a forward pass of the RepVGGDW block without fusing the convolutions.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after applying the depth wise separable convolution.
+        """
+        return self.act(self.conv(x))
+
+    @torch.no_grad()
+    def fuse(self):
+        """
+        Fuse the convolutional layers in the RepVGGDW block.
+
+        This method fuses the convolutional layers and updates the weights and biases accordingly.
+        """
+        conv = fuse_conv_and_bn(self.conv.conv, self.conv.bn)
+        conv1 = fuse_conv_and_bn(self.conv1.conv, self.conv1.bn)
+
+        conv_w = conv.weight
+        conv_b = conv.bias
+        conv1_w = conv1.weight
+        conv1_b = conv1.bias
+
+        conv1_w = torch.nn.functional.pad(conv1_w, [2, 2, 2, 2])
+
+        final_conv_w = conv_w + conv1_w
+        final_conv_b = conv_b + conv1_b
+
+        conv.weight.data.copy_(final_conv_w)
+        conv.bias.data.copy_(final_conv_b)
+
+        self.conv = conv
+        del self.conv1
+
+
+class QCIB(nn.Module):
+    """
+    Conditional Identity Block (CIB) module.
+
+    Args:
+        c1 (int): Number of input channels.
+        c2 (int): Number of output channels.
+        shortcut (bool, optional): Whether to add a shortcut connection. Defaults to True.
+        e (float, optional): Scaling factor for the hidden channels. Defaults to 0.5.
+        lk (bool, optional): Whether to use RepVGGDW for the third convolutional layer. Defaults to False.
+    """
+
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, e: float = 0.5, lk: bool = False):
+        """
+        Initialize the CIB module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use shortcut connection.
+            e (float): Expansion ratio.
+            lk (bool): Whether to use RepVGGDW.
+        """
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = nn.Sequential(
+            Conv(c1, c1, 3, g=c1),
+            Conv(c1, 2 * c_, 1),
+            RepVGGDW(2 * c_) if lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
+            Conv(2 * c_, c2, 1),
+            Conv(c2, c2, 3, g=c2),
+        )
+
+        self.add = shortcut and c1 == c2
+        self.add_fn = FloatFunctional()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the CIB module.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor.
+        """
+        return self.add_fn.add(x, self.cv1(x)) if self.add else self.cv1(x)
+
+
+class QC2fCIB(QC2f):
+    """
+    C2fCIB class represents a convolutional block with C2f and CIB modules.
+
+    Args:
+        c1 (int): Number of input channels.
+        c2 (int): Number of output channels.
+        n (int, optional): Number of CIB modules to stack. Defaults to 1.
+        shortcut (bool, optional): Whether to use shortcut connection. Defaults to False.
+        lk (bool, optional): Whether to use local key connection. Defaults to False.
+        g (int, optional): Number of groups for grouped convolution. Defaults to 1.
+        e (float, optional): Expansion ratio for CIB modules. Defaults to 0.5.
+    """
+
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5
+    ):
+        """
+        Initialize C2fCIB module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of CIB modules.
+            shortcut (bool): Whether to use shortcut connection.
+            lk (bool): Whether to use local key connection.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(QCIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))
+
+class QDFL(nn.Module):
+    """
+    Integral module of Distribution Focal Loss (DFL).
+
+    Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
+    """
+
+    def __init__(self, c1: int = 16):
+        """
+        Initialize a convolutional layer with a given number of input channels.
+
+        Args:
+            c1 (int): Number of input channels.
+        """
+        super().__init__()
+        self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
+        x = torch.arange(c1, dtype=torch.float)
+        self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
+        self.c1 = c1
+        self.sm = Softmax(dim=1)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the DFL module to input tensor and return transformed output."""
+        b, _, a = x.shape  # batch, channels, anchors
+        x = self.quant(x)
+        if (x.dtype == torch.float32):
+            return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+            # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
+        else:
+            x = self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
+            x = self.dequant(x)
+            return x
