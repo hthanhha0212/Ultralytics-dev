@@ -87,16 +87,12 @@ class DFL(nn.Module):
         x = torch.arange(c1, dtype=torch.float)
         self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
         self.c1 = c1
-        self.sm = Softmax(dim=1)
-
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         b, _, a = x.shape  # batch, channels, anchors
-        if (x.dtype == torch.float32):
-            return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
-            # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
-        else:
-            return self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
+        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+        # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
 
 
 class Proto(nn.Module):
