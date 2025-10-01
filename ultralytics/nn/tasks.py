@@ -262,8 +262,6 @@ class BaseModel(torch.nn.Module):
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
         return x
     
-    print("test")
-
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
         LOGGER.warning(
