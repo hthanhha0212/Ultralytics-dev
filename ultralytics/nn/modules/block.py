@@ -2112,7 +2112,7 @@ class QC2f(nn.Module):
 
         """ Convert all the tensors in the list to float and requantize, 
         to resolve the quantization parameters mismatching""" 
-        if (y[0].dtype != torch.float32):
+        if y[0].dtype in (torch.quint8, torch.qint8):
             l = [self.dequant(item) for item in y]
             y = self.quant(torch.cat(l, 1))
         else:
@@ -2235,7 +2235,7 @@ class QSPPF(nn.Module):
 
         """ Convert all the tensors in the list to float and requantize, 
         to resolve the quantization parameters mismatching""" 
-        if (y[0].dtype != torch.float32):
+        if y[0].dtype in (torch.quint8, torch.qint8):
             l = [self.dequant(item) for item in y]
             y = self.quant(torch.cat(l, 1))
         else:
@@ -2387,7 +2387,7 @@ class QPSA(nn.Module):
 
         """ Convert all the tensors in the list to float and requantize, 
         to resolve the quantization parameters mismatching""" 
-        if (b.dtype != torch.float32):
+        if b.dtype in (torch.quint8, torch.qint8):
             a = self.dequant(a)
             b = self.dequant(b)
             r = self.quant(torch.cat((a, b), 1))
@@ -2580,7 +2580,7 @@ class QDFL(nn.Module):
         b, _, a = x.shape  # batch, channels, anchors
         if self.q:
             x = self.quant(x)
-        if (x.dtype == torch.quint8):
+        if x.dtype in (torch.quint8, torch.qint8):
             x = self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
             x = self.dequant(x)
             return x

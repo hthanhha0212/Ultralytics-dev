@@ -1361,7 +1361,7 @@ class QDetect(nn.Module):
 
             """ Convert all the tensors in the list to float and requantize, 
             to resolve the quantization parameters mismatching""" 
-            if (out1.dtype == torch.quint8):
+            if out1.dtype in (torch.quint8, torch.qint8):
                 out1 = self.dequant(out1)
                 out2 = self.dequant(out2)
                 out = self.quant(torch.cat((out1, out2), 1))
@@ -1375,7 +1375,7 @@ class QDetect(nn.Module):
             tmp2 = self.cv3[i](x[i])
             """ Convert all the tensors in the list to float and requantize, 
             to resolve the quantization parameters mismatching""" 
-            if (tmp1.dtype == torch.quint8):
+            if tmp1.dtype in (torch.quint8, torch.qint8):
                 tmp1 = self.dequant(tmp1)
                 tmp2 = self.dequant(tmp2)
                 x[i] = self.quant(torch.cat((tmp1, tmp2), 1))
