@@ -84,6 +84,7 @@ class Model(torch.nn.Module):
         model: str | Path | Model = "yolo11n.pt",
         task: str = None,
         verbose: bool = False,
+        q: bool = False
     ) -> None:
         """
         Initialize a new instance of the YOLO model class.
@@ -126,6 +127,7 @@ class Model(torch.nn.Module):
         self.session = None  # HUB session
         self.task = task  # task type
         self.model_name = None  # model name
+        self.q = q # quantization 
         model = str(model).strip()
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
@@ -148,7 +150,7 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose)
+            self._new(model, task=task, verbose=verbose, q=q)
         else:
             self._load(model, task=task)
 
@@ -235,7 +237,7 @@ class Model(torch.nn.Module):
 
         return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
+    def _new(self, cfg: str, task=None, model=None, verbose=False, q=False) -> None:
         """
         Initialize a new model and infer the task type from model definitions.
 
@@ -260,7 +262,8 @@ class Model(torch.nn.Module):
         cfg_dict = yaml_model_load(cfg)
         self.cfg = cfg
         self.task = task or guess_model_task(cfg_dict)
-        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
+        self.q = q
+        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q)  # build model
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
 

@@ -171,64 +171,7 @@ class BaseModel(torch.nn.Module):
         """
         if augment:
             return self._predict_augment(x)
-        if self.q:
-            return self._predict_once_q_glob(x, profile, visualize, embed)
         return self._predict_once(x, profile, visualize, embed)
-
-    def _predict_once_q_glob(self, x, profile=False, visualize=False, embed=None):
-        """
-        Perform a forward pass through the network.
-
-        Args:
-            x (torch.Tensor): The input tensor to the model.
-            profile (bool): Print the computation time of each layer if True.
-            visualize (bool): Save the feature maps of the model if True.
-            embed (list, optional): A list of feature vectors/embeddings to return.
-
-        Returns:
-            (torch.Tensor): The last output of the model.
-        """
-        y, dt, embeddings = [], [], []  # outputs
-        embed = frozenset(embed) if embed is not None else {-1}
-        max_idx = max(embed)
-        for m in self.model:
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            #print("Processing layer:", m.__class__.__name__)
-            
-            if (isinstance(m, Concat)):
-                x = [self.quant(item) for item in x]
-                x = m(x)
-                x = self.dequant(x)
-
-            elif (isinstance(m, v10Detect)):
-                x = m(x)
-            #elif (isinstance(m, v10Detect)):
-            #    x = [self.quant(item) for item in x]
-            #    x = m(x)
-            #    if (isinstance(x, tuple)):
-            #        x = list(x)
-            #        x[0] = self.dequant(x[0])
-            #        x[1]['one2one'] = [self.dequant(item) for item in x[1]['one2one']]
-            #        x[1]['one2many'] = [self.dequant(item) for item in x[1]['one2many']]
-            #        x = tuple(x)
-            #    else:
-            #        x['one2one'] = [self.dequant(item) for item in x['one2one']]
-            #        x['one2many'] = [self.dequant(item) for item in x['one2many']]
-            else:
-                x = self.quant(x)
-                x = m(x)  # run 
-                x = self.dequant(x)
-            y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-            if m.i in embed:
-                embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
-                if m.i == max_idx:
-                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
-        return x
     
     def _predict_once(self, x, profile=False, visualize=False, embed=None):
         """
@@ -471,7 +414,7 @@ class DetectionModel(BaseModel):
         if nc and nc != self.yaml["nc"]:
             LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml["nc"] = nc  # override YAML value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose, q=q)  # model, savelist
         self.names = {i: f"{i}" for i in range(self.yaml["nc"])}  # default names dict
         self.inplace = self.yaml.get("inplace", True)
         self.end2end = getattr(self.model[-1], "end2end", False)
@@ -1598,7 +1541,7 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     return model, ckpt
 
 
-def parse_model(d, ch, verbose=True):
+def parse_model(d, ch, verbose=True, q=False):
     """
     Parse a YOLO model.yaml dictionary into a PyTorch model.
 
@@ -1612,7 +1555,6 @@ def parse_model(d, ch, verbose=True):
         save (list): Sorted list of output layers.
     """
     import ast
-
     # Args
     legacy = True  # backward compatibility for v3/v5/v8/v9 models
     max_channels = float("inf")
@@ -1677,6 +1619,19 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             QC2fCIB,
             A2C2f,
+        }
+    )
+    quantize_modules = frozenset(
+        {
+            QConv,
+            QBottleneck,
+            QSPPF,
+            QC2f,
+            QPSA,
+            QSCDown,
+            QC2fCIB,
+            QDetect,
+            Qv10Detect,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1771,8 +1726,8 @@ def parse_model(d, ch, verbose=True):
             args = [*args[1:]]
         else:
             c2 = ch[f]
-
-        m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        quantize_kwargs = {"q": True} if (q and m in quantize_modules) else {} 
+        m_ = torch.nn.Sequential(*(m(*args, **quantize_kwargs) for _ in range(n))) if n > 1 else m(*args, **quantize_kwargs)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type

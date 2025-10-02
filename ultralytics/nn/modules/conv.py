@@ -728,7 +728,7 @@ class QConv(nn.Module):
 
     default_act = nn.ReLU()  # default activation
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, q=False):
         """
         Initialize Conv layer with given parameters.
 
@@ -746,9 +746,10 @@ class QConv(nn.Module):
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
-
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x):
         """
@@ -760,9 +761,13 @@ class QConv(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+
         x = self.act(self.bn(self.conv(x)))
-        x = self.dequant(x)
+        
+        if self.q:
+            x = self.dequant(x)
         return x
 
     def forward_fuse(self, x):
@@ -775,9 +780,13 @@ class QConv(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+            
         x = self.act(self.conv(x))
-        x = self.dequant(x)
+
+        if self.q:
+            x = self.dequant(x)
         return x
 
 class QConcat(nn.Module):

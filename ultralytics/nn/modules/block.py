@@ -87,7 +87,7 @@ class DFL(nn.Module):
         x = torch.arange(c1, dtype=torch.float)
         self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
         self.c1 = c1
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         b, _, a = x.shape  # batch, channels, anchors
@@ -2079,7 +2079,7 @@ class QBottleneck(nn.Module):
 class QC2f(nn.Module):
     """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, q: bool =False):
         """
         Initialize a CSP bottleneck with 2 convolutions.
 
@@ -2097,12 +2097,16 @@ class QC2f(nn.Module):
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through C2f layer."""
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
 
@@ -2115,17 +2119,22 @@ class QC2f(nn.Module):
             y = torch.cat(y, 1)
         
         y = self.cv2(y)
-        y = self.dequant(y)
+        if self.q:
+            y = self.dequant(y)
         return y
 
     def forward_split(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass using split() instead of chunk()."""
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+        
         y = self.cv1(x).split((self.c, self.c), 1)
         y = [y[0], y[1]]
         y.extend(m(y[-1]) for m in self.m)
         y = self.cv2(torch.cat(y, 1))
-        y = self.dequant(y)
+        
+        if self.q:
+            y = self.dequant(y)
         return y
     
 class QSCDown(nn.Module):
@@ -2152,7 +2161,7 @@ class QSCDown(nn.Module):
         torch.Size([1, 128, 64, 64])
     """
 
-    def __init__(self, c1: int, c2: int, k: int, s: int):
+    def __init__(self, c1: int, c2: int, k: int, s: int, q: bool=False):
         """
         Initialize SCDown module.
 
@@ -2165,8 +2174,10 @@ class QSCDown(nn.Module):
         super().__init__()
         self.cv1 = Conv(c1, c2, 1, 1)
         self.cv2 = Conv(c2, c2, k=k, s=s, g=c2, act=False)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2178,16 +2189,20 @@ class QSCDown(nn.Module):
         Returns:
             (torch.Tensor): Downsampled output tensor.
         """
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+        
         x = self.cv2(self.cv1(x))
-        x = self.dequant(x)
+        
+        if self.q:
+            x = self.dequant(x)
 
         return x
     
 class QSPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
-    def __init__(self, c1: int, c2: int, k: int = 5):
+    def __init__(self, c1: int, c2: int, k: int = 5, q: bool=False):
         """
         Initialize the SPPF layer with given input/output channels and kernel size.
 
@@ -2204,12 +2219,15 @@ class QSPPF(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * 4, c2, 1, 1)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply sequential pooling operations to input and return concatenated feature maps."""
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
 
         y = [self.cv1(x)]
         y.extend(self.m(y[-1]) for _ in range(3))
@@ -2225,8 +2243,9 @@ class QSPPF(nn.Module):
         
         # return self.cv2(torch.cat(y, 1))
         y = self.cv2(y)
-
-        y = self.dequant(y)
+        
+        if self.q:
+            y = self.dequant(y)
         return y
 
 class QAttention(nn.Module):
@@ -2326,7 +2345,7 @@ class QPSA(nn.Module):
         >>> output_tensor = psa.forward(input_tensor)
     """
 
-    def __init__(self, c1: int, c2: int, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, e: float = 0.5, q: bool=False):
         """
         Initialize PSA module.
 
@@ -2344,8 +2363,10 @@ class QPSA(nn.Module):
         self.attn = QAttention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
         self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
         self.fl = FloatFunctional()
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2357,7 +2378,9 @@ class QPSA(nn.Module):
         Returns:
             (torch.Tensor): Output tensor after attention and feed-forward processing.
         """
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
+        
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
         b = self.fl.add(b, self.attn(b))
         b = self.fl.add(b, self.ffn(b))
@@ -2373,7 +2396,8 @@ class QPSA(nn.Module):
         
         #r = self.cv2(torch.cat((a, b), 1))
         r = self.cv2(r)
-        r = self.dequant(x)
+        if self.q:
+            r = self.dequant(x)
         return r
 
     
@@ -2509,7 +2533,7 @@ class QC2fCIB(QC2f):
     """
 
     def __init__(
-        self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5
+        self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5, q: bool =False
     ):
         """
         Initialize C2fCIB module.
@@ -2523,7 +2547,7 @@ class QC2fCIB(QC2f):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, q)
         self.m = nn.ModuleList(QCIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))
 
 class QDFL(nn.Module):
@@ -2533,7 +2557,7 @@ class QDFL(nn.Module):
     Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
     """
 
-    def __init__(self, c1: int = 16):
+    def __init__(self, c1: int = 16, q:bool =False):
         """
         Initialize a convolutional layer with a given number of input channels.
 
@@ -2546,13 +2570,16 @@ class QDFL(nn.Module):
         self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
         self.c1 = c1
         self.sm = Softmax(dim=1)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         b, _, a = x.shape  # batch, channels, anchors
-        x = self.quant(x)
+        if self.q:
+            x = self.quant(x)
         if (x.dtype == torch.quint8):
             x = self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
             x = self.dequant(x)

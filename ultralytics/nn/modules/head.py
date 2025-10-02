@@ -1283,7 +1283,7 @@ class QDetect(nn.Module):
     legacy = False  # backward compatibility for v3/v5/v8/v9 models
     xyxy = False  # xyxy or xywh output
 
-    def __init__(self, nc: int = 80, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ch: tuple = (), q: bool=False):
         """
         Initialize the YOLO detection layer with specified number of classes and channels.
 
@@ -1314,8 +1314,10 @@ class QDetect(nn.Module):
             )
         )
         self.dfl = QDFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
+        self.q = q
+        if self.q:
+            self.quant = QuantStub()
+            self.dequant = DeQuantStub()
         if self.end2end:
             self.one2one_cv2 = copy.deepcopy(self.cv2)
             self.one2one_cv3 = copy.deepcopy(self.cv3)
@@ -1343,7 +1345,8 @@ class QDetect(nn.Module):
             outputs (dict | tuple): Training mode returns dict with one2many and one2one outputs.
                 Inference mode returns processed detections or tuple with detections and raw outputs.
         """
-        x = [self.quant(item) for item in x]
+        if self.q:
+            x = [self.quant(item) for item in x]
 
         x_detach = [xi.detach() for xi in x]
 
@@ -1358,7 +1361,7 @@ class QDetect(nn.Module):
 
             """ Convert all the tensors in the list to float and requantize, 
             to resolve the quantization parameters mismatching""" 
-            if (out1.dtype != torch.float32):
+            if (out1.dtype == torch.quint8):
                 out1 = self.dequant(out1)
                 out2 = self.dequant(out2)
                 out = self.quant(torch.cat((out1, out2), 1))
@@ -1372,15 +1375,16 @@ class QDetect(nn.Module):
             tmp2 = self.cv3[i](x[i])
             """ Convert all the tensors in the list to float and requantize, 
             to resolve the quantization parameters mismatching""" 
-            if (tmp1.dtype != torch.float32):
+            if (tmp1.dtype == torch.quint8):
                 tmp1 = self.dequant(tmp1)
                 tmp2 = self.dequant(tmp2)
                 x[i] = self.quant(torch.cat((tmp1, tmp2), 1))
             else:
                 x[i] = torch.cat((tmp1, tmp2), 1)
-            
-        x = [self.dequant(item) for item in x]
-        one2one = [self.dequant(item) for item in one2one]
+        
+        if self.q:  
+            x = [self.dequant(item) for item in x]
+            one2one = [self.dequant(item) for item in one2one]
         
         if self.training:  # Training path
             return {"one2many": x, "one2one": one2one}
@@ -1497,7 +1501,7 @@ class Qv10Detect(QDetect):
 
     end2end = True
 
-    def __init__(self, nc: int = 80, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ch: tuple = (), q: bool = False):
         """
         Initialize the v10Detect object with the specified number of classes and input channels.
 
@@ -1505,7 +1509,7 @@ class Qv10Detect(QDetect):
             nc (int): Number of classes.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc, ch, q)
         c3 = max(ch[0], min(self.nc, 100))  # channels
         # Light cls head
         self.cv3 = nn.ModuleList(
