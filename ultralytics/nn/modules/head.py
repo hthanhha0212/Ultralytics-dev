@@ -1313,7 +1313,7 @@ class QDetect(nn.Module):
                 for x in ch
             )
         )
-        self.dfl = QDFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        self.dfl = QDFL(self.reg_max, q=q) if self.reg_max > 1 else nn.Identity()
         self.q = q
         if self.q:
             self.quant = QuantStub()
