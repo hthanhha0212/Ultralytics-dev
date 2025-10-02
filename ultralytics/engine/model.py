@@ -84,7 +84,8 @@ class Model(torch.nn.Module):
         model: str | Path | Model = "yolo11n.pt",
         task: str = None,
         verbose: bool = False,
-        q: bool = False
+        q: bool = False,
+        do_qat: bool = False
     ) -> None:
         """
         Initialize a new instance of the YOLO model class.
@@ -127,7 +128,8 @@ class Model(torch.nn.Module):
         self.session = None  # HUB session
         self.task = task  # task type
         self.model_name = None  # model name
-        self.q = q # quantization 
+        self.q = q # quantization
+        self.do_qat = do_qat 
         model = str(model).strip()
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
@@ -797,7 +799,10 @@ class Model(torch.nn.Module):
 
         self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks)
         if not args.get("resume"):  # manually set model only if not resuming
-            self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml, q=self.q)
+            if self.do_qat:
+                self.trainer.model = self.model
+            else:
+                self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml, q=self.q)
             self.model = self.trainer.model
 
         self.trainer.train()
