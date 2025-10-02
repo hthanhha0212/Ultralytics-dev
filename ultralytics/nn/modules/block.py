@@ -2557,7 +2557,7 @@ class QDFL(nn.Module):
     Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
     """
 
-    def __init__(self, c1: int = 16, q:bool =False):
+    def __init__(self, c1: int = 16):
         """
         Initialize a convolutional layer with a given number of input channels.
 
@@ -2570,19 +2570,12 @@ class QDFL(nn.Module):
         self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
         self.c1 = c1
         self.sm = Softmax(dim=1)
-        self.q = q
-        if self.q:
-            self.quant = QuantStub()
-            self.dequant = DeQuantStub()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         b, _, a = x.shape  # batch, channels, anchors
-        if self.q:
-            x = self.quant(x)
         if x.dtype in (torch.quint8, torch.qint8):
             x = self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
-            x = self.dequant(x)
             return x
             # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
         else:
