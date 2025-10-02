@@ -149,7 +149,7 @@ class DetectionTrainer(BaseTrainer):
         self.model.args = self.args  # attach hyperparameters to model
         # TODO: self.model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc
 
-    def get_model(self, cfg: str | None = None, weights: str | None = None, verbose: bool = True):
+    def get_model(self, cfg: str | None = None, weights: str | None = None, verbose: bool = True, q: bool = False):
         """
         Return a YOLO detection model.
 
@@ -157,11 +157,12 @@ class DetectionTrainer(BaseTrainer):
             cfg (str, optional): Path to model configuration file.
             weights (str, optional): Path to model weights.
             verbose (bool): Whether to display model information.
+            q (bool): Quantization support
 
         Returns:
             (DetectionModel): YOLO detection model.
         """
-        model = DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
+        model = DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1, q=q)
         if weights:
             model.load(weights)
         return model
