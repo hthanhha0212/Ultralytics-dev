@@ -641,7 +641,6 @@ class BaseTrainer:
             buffer,
         )
         serialized_ckpt = buffer.getvalue()  # get the serialized content to save
-        breakpoint()
         # Save checkpoints
         self.last.write_bytes(serialized_ckpt)  # save last.pt
         if self.best_fitness == self.fitness:
