@@ -152,7 +152,7 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose, q=q)
+            self._new(model, task=task, verbose=verbose, q=q, do_qat=do_qat)
         else:
             self._load(model, task=task)
 
@@ -239,7 +239,7 @@ class Model(torch.nn.Module):
 
         return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False, q=False) -> None:
+    def _new(self, cfg: str, task=None, model=None, verbose=False, q=False, do_qat=False) -> None:
         """
         Initialize a new model and infer the task type from model definitions.
 
@@ -265,6 +265,7 @@ class Model(torch.nn.Module):
         self.cfg = cfg
         self.task = task or guess_model_task(cfg_dict)
         self.q = q
+        self.do_qat = do_qat
         self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q)  # build model
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
