@@ -266,7 +266,7 @@ class Model(torch.nn.Module):
         self.task = task or guess_model_task(cfg_dict)
         self.q = q
         self.do_qat = do_qat
-        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q)  # build model
+        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q, do_qat=do_qat)  # build model
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
 

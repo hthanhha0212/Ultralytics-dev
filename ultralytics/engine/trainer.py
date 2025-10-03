@@ -266,7 +266,6 @@ class BaseTrainer:
 
         # Compile model
         self.model = attempt_compile(self.model, device=self.device, mode=self.args.compile)
-
         # Freeze layers
         freeze_list = (
             self.args.freeze
@@ -358,7 +357,6 @@ class BaseTrainer:
         if self.world_size > 1:
             self._setup_ddp()
         self._setup_train()
-
         nb = len(self.train_loader)  # number of batches
         nw = max(round(self.args.warmup_epochs * nb), 100) if self.args.warmup_epochs > 0 else -1  # warmup iterations
         last_opt_step = -1
@@ -482,7 +480,10 @@ class BaseTrainer:
 
                 # Save model
                 if self.args.save or final_epoch:
-                    self.save_model()
+                    if self.model.do_qat:
+                        self.save_model_qat()
+                    else:
+                        self.save_model()
                     self.run_callbacks("on_model_save")
 
             # Scheduler
@@ -609,6 +610,45 @@ class BaseTrainer:
         if (self.save_period > 0) and (self.epoch % self.save_period == 0):
             (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
 
+    def save_model_qat(self):
+        """Save model training checkpoints with additional metadata."""
+        import io
+
+        # Serialize ckpt to a byte buffer once (faster than repeated torch.save() calls)
+        buffer = io.BytesIO()
+        torch.save(
+            {
+                "epoch": self.epoch,
+                "best_fitness": self.best_fitness,
+                "model": None,  # resume and final checkpoints derive from EMA
+                "ema": deepcopy(unwrap_model(self.ema.ema)).half(),
+                "updates": self.ema.updates,
+                "optimizer": convert_optimizer_state_dict_to_fp16(deepcopy(self.optimizer.state_dict())),
+                "train_args": vars(self.args),  # save as dict
+                "train_metrics": {**self.metrics, **{"fitness": self.fitness}},
+                "train_results": self.read_results_csv(),
+                "date": datetime.now().isoformat(),
+                "version": __version__,
+                "git": {
+                    "root": str(GIT.root),
+                    "branch": GIT.branch,
+                    "commit": GIT.commit,
+                    "origin": GIT.origin,
+                },
+                "license": "AGPL-3.0 (https://ultralytics.com/license)",
+                "docs": "https://docs.ultralytics.com",
+            },
+            buffer,
+        )
+        serialized_ckpt = buffer.getvalue()  # get the serialized content to save
+        breakpoint()
+        # Save checkpoints
+        self.last.write_bytes(serialized_ckpt)  # save last.pt
+        if self.best_fitness == self.fitness:
+            self.best.write_bytes(serialized_ckpt)  # save best.pt
+        if (self.save_period > 0) and (self.epoch % self.save_period == 0):
+            (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
+
     def get_dataset(self):
         """
         Get train and validation datasets from data dictionary.
@@ -672,7 +712,6 @@ class BaseTrainer:
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad()
-        breakpoint()
         if self.ema:
             self.ema.update(self.model)
 
