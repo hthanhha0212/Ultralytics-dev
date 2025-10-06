@@ -226,8 +226,7 @@ class BaseModel(torch.nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
-        if (x.dtype == torch.float32):
-            x = self.quant(x)
+        x = self.quant(x)
         y, dt, embeddings = [], [], []  # outputs
         embed = frozenset(embed) if embed is not None else {-1}
         max_idx = max(embed)

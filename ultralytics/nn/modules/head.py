@@ -1651,9 +1651,8 @@ class QATDetect(nn.Module):
         for i in range(self.nl):
             x[i] = self.fl.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)            
         
-        if ((x[0].dtype in (torch.quint8, torch.qint8)) and (one2one[0].dtype in (torch.quint8, torch.qint8))):
-            x = [self.dequant(item) for item in x]
-            one2one = [self.dequant(item) for item in one2one]
+        x = [self.dequant(item) for item in x]
+        one2one = [self.dequant(item) for item in one2one]
         
         if self.training:  # Training path
             return {"one2many": x, "one2one": one2one}
