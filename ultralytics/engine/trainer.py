@@ -6,6 +6,7 @@ Usage:
     $ yolo mode=train model=yolo11n.pt data=coco8.yaml imgsz=640 epochs=100 batch=16
 """
 
+import dill
 import gc
 import math
 import os
@@ -54,6 +55,7 @@ from ultralytics.utils.torch_utils import (
     one_cycle,
     select_device,
     strip_optimizer,
+    strip_optimizer_do_qat,
     torch_distributed_zero_first,
     unset_deterministic,
     unwrap_model,
@@ -512,7 +514,10 @@ class BaseTrainer:
             # Do final val with best.pt
             seconds = time.time() - self.train_time_start
             LOGGER.info(f"\n{epoch - self.start_epoch + 1} epochs completed in {seconds / 3600:.3f} hours.")
-            self.final_eval()
+            if self.model.do_qat:
+                self.final_eval_do_qat()
+            else:
+                self.final_eval()
             if self.args.plots:
                 self.plot_metrics()
             self.run_callbacks("on_train_end")
@@ -638,7 +643,7 @@ class BaseTrainer:
                 "license": "AGPL-3.0 (https://ultralytics.com/license)",
                 "docs": "https://docs.ultralytics.com",
             },
-            buffer,
+            buffer, pickle_module=dill,
         )
         serialized_ckpt = buffer.getvalue()  # get the serialized content to save
         # Save checkpoints
@@ -806,6 +811,23 @@ class BaseTrainer:
                 elif f is self.best:
                     k = "train_results"  # update best.pt train_metrics from last.pt
                     strip_optimizer(f, updates={k: ckpt[k]} if k in ckpt else None)
+                    LOGGER.info(f"\nValidating {f}...")
+                    self.validator.args.plots = self.args.plots
+                    self.validator.args.compile = False  # disable final val compile as too slow
+                    self.metrics = self.validator(model=f)
+                    self.metrics.pop("fitness", None)
+                    self.run_callbacks("on_fit_epoch_end")
+
+    def final_eval_do_qat(self):
+        """Perform final evaluation and validation for object detection YOLO model."""
+        ckpt = {}
+        for f in self.last, self.best:
+            if f.exists():
+                if f is self.last:
+                    ckpt = strip_optimizer_do_qat(f)
+                elif f is self.best:
+                    k = "train_results"  # update best.pt train_metrics from last.pt
+                    strip_optimizer_do_qat(f, updates={k: ckpt[k]} if k in ckpt else None)
                     LOGGER.info(f"\nValidating {f}...")
                     self.validator.args.plots = self.args.plots
                     self.validator.args.compile = False  # disable final val compile as too slow

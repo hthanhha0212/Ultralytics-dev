@@ -22,6 +22,7 @@ from ultralytics.nn.modules import (
     OBB,
     PSA,
     QPSA,
+    QATPSA,
     SPP,
     SPPELAN,
     SPPF,
@@ -34,9 +35,11 @@ from ultralytics.nn.modules import (
     BottleneckCSP,
     C2f,
     QC2f,
+    QATC2f,
     C2fAttn,
     C2fCIB,
     QC2fCIB,
+    QATC2fCIB,
     C2fPSA,
     C3Ghost,
     C3k2,
@@ -52,6 +55,7 @@ from ultralytics.nn.modules import (
     ConvTranspose,
     Detect,
     QDetect,
+    QATDetect,
     DWConv,
     DWConvTranspose2d,
     Focus,
@@ -79,6 +83,7 @@ from ultralytics.nn.modules import (
     YOLOESegment,
     v10Detect,
     Qv10Detect,
+    QATv10Detect,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -221,21 +226,16 @@ class BaseModel(torch.nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
+        x = self.quant(x)
         y, dt, embeddings = [], [], []  # outputs
         embed = frozenset(embed) if embed is not None else {-1}
         max_idx = max(embed)
         for m in self.model:
-            #print("Processing layer:", m.__class__.__name__)
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
-            if (isinstance(m, (Concat, v10Detect))):
-                x = m(x)
-            else:
-                x = self.quant(x)
-                x = m(x)  # run
-                x = self.dequant(x)
+            x = m(x)
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -302,10 +302,10 @@ class BaseModel(torch.nn.Module):
                 if isinstance(m, RepConv):
                     m.fuse_convs()
                     m.forward = m.forward_fuse  # update forward
-                if isinstance(m, RepVGGDW):
+                if isinstance(m, (RepVGGDW, QRepVGGDW)):
                     m.fuse()
                     m.forward = m.forward_fuse
-                if isinstance(m, (v10Detect, Qv10Detect)):
+                if isinstance(m, (v10Detect, Qv10Detect, QATv10Detect)):
                     m.fuse()  # remove one2many head
             self.info(verbose=verbose)
 
@@ -348,7 +348,7 @@ class BaseModel(torch.nn.Module):
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
         if isinstance(
-            m, (Detect, QDetect)
+            m, (Detect, QDetect, QATDetect)
         ):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect, YOLOEDetect, YOLOESegment
             m.stride = fn(m.stride)
             m.anchors = fn(m.anchors)
@@ -461,7 +461,7 @@ class DetectionModel(BaseModel):
 
         # Build strides
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect, QDetect)):  # includes all Detect subclasses like Segment, Pose, OBB, YOLOEDetect, YOLOESegment
+        if isinstance(m, (Detect, QDetect, QATDetect)):  # includes all Detect subclasses like Segment, Pose, OBB, YOLOEDetect, YOLOESegment
             s = 256  # 2x min stride
             m.inplace = self.inplace
 
@@ -1638,6 +1638,7 @@ def parse_model(d, ch, verbose=True, q=False):
             C2,
             C2f,
             QC2f,
+            QATC2f,
             C3k2,
             RepNCSPELAN4,
             ELAN1,
@@ -1654,10 +1655,12 @@ def parse_model(d, ch, verbose=True, q=False):
             RepC3,
             PSA,
             QPSA,
+            QATPSA,
             SCDown,
             QSCDown,
             C2fCIB,
             QC2fCIB,
+            QATC2fCIB,
             A2C2f,
         }
     )
@@ -1667,11 +1670,16 @@ def parse_model(d, ch, verbose=True, q=False):
             QBottleneck,
             QSPPF,
             QC2f,
+            QATC2f,
             QPSA,
+            QATPSA,
             QSCDown,
             QC2fCIB,
+            QATC2fCIB,
             QDetect,
+            QATDetect,
             Qv10Detect,
+            QATv10Detect,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1681,6 +1689,7 @@ def parse_model(d, ch, verbose=True, q=False):
             C2,
             C2f,
             QC2f,
+            QATC2f,
             C3k2,
             C2fAttn,
             C3,
@@ -1691,6 +1700,7 @@ def parse_model(d, ch, verbose=True, q=False):
             C2fPSA,
             C2fCIB,
             QC2fCIB,
+            QATC2fCIB,
             C2PSA,
             A2C2f,
         }
@@ -1728,7 +1738,7 @@ def parse_model(d, ch, verbose=True, q=False):
                 legacy = False
                 if scale in "lx":  # for L/X sizes
                     args.extend((True, 1.2))
-            if m is C2fCIB:
+            if m in (C2fCIB, QC2fCIB, QATC2fCIB):
                 legacy = False
         elif m is AIFI:
             args = [ch[f], *args]
@@ -1745,12 +1755,12 @@ def parse_model(d, ch, verbose=True, q=False):
         elif m is Concat or m is QConcat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, QDetect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, Qv10Detect}
+            {Detect, QDetect, QATDetect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, Qv10Detect, QATv10Detect}
         ):
             args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, QDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
+            if m in {Detect, QDetect, QATDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
@@ -1867,7 +1877,7 @@ def guess_model_task(model):
                 return "pose"
             elif isinstance(m, OBB):
                 return "obb"
-            elif isinstance(m, (Detect, QDetect, WorldDetect, YOLOEDetect, v10Detect, Qv10Detect)):
+            elif isinstance(m, (Detect, QDetect, QATDetect, WorldDetect, YOLOEDetect, v10Detect, Qv10Detect, QATv10Detect)):
                 return "detect"
 
     # Guess from model filename

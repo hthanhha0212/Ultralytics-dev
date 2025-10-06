@@ -28,8 +28,9 @@ __all__ = (
     "C3",
     "C2f",
     "QC2f",
+    "QATC2f",
     "C2fAttn",
-    "ImagePoolingAttn",
+    "ImageP1oolingAttn",
     "ContrastiveHead",
     "BNContrastiveHead",
     "C3x",
@@ -58,10 +59,12 @@ __all__ = (
     "QCIB",
     "C2fCIB",
     "QC2fCIB",
+    "QATC2fCIB",
     "Attention",
     "QAttention",
     "PSA",
     "QPSA",
+    "QATPSA",
     "SCDown",
     "QSCDown",
     "TorchVision",
@@ -2417,6 +2420,7 @@ class QRepVGGDW(torch.nn.Module):
         self.dim = ed
         #self.act = nn.SiLU()
         self.act = nn.ReLU()
+        self.fl = FloatFunctional()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2428,7 +2432,7 @@ class QRepVGGDW(torch.nn.Module):
         Returns:
             (torch.Tensor): Output tensor after applying the depth wise separable convolution.
         """
-        return self.act(self.conv(x) + self.conv1(x))
+        return self.act(self.fl.add(self.conv(x), self.conv1(x)))
     
     def forward_fuse(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -2497,7 +2501,7 @@ class QCIB(nn.Module):
         self.cv1 = nn.Sequential(
             Conv(c1, c1, 3, g=c1),
             Conv(c1, 2 * c_, 1),
-            RepVGGDW(2 * c_) if lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
+            QRepVGGDW(2 * c_) if lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
             Conv(2 * c_, c2, 1),
             Conv(c2, c2, 3, g=c2),
         )
@@ -2587,3 +2591,133 @@ class QDFL(nn.Module):
             # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
         else:
             return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+
+#Quantization Aware Traininng modules 
+
+"""For C2f module, Bottleneck module is modified to QBottleneck module to handle "empty strided on quantized tensors" issue  """
+class QATC2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+        """
+        Initialize a CSP bottleneck with 2 convolutions.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.fl = FloatFunctional()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through C2f layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(self.fl.cat(y, 1))
+
+    def forward_split(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass using split() instead of chunk()."""
+        y = self.cv1(x).split((self.c, self.c), 1)
+        y = [y[0], y[1]]
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(self.fl.cat(y, 1))
+
+"""PSA module is modified into QATPSA, the matmul and add operation are replaced by the quantized operations"""
+class QATPSA(nn.Module):
+    """
+    PSA class for implementing Position-Sensitive Attention in neural networks.
+
+    This class encapsulates the functionality for applying position-sensitive attention and feed-forward networks to
+    input tensors, enhancing feature extraction and processing capabilities.
+
+    Attributes:
+        c (int): Number of hidden channels after applying the initial convolution.
+        cv1 (Conv): 1x1 convolution layer to reduce the number of input channels to 2*c.
+        cv2 (Conv): 1x1 convolution layer to reduce the number of output channels to c.
+        attn (Attention): Attention module for position-sensitive attention.
+        ffn (nn.Sequential): Feed-forward network for further processing.
+
+    Methods:
+        forward: Applies position-sensitive attention and feed-forward network to the input tensor.
+
+    Examples:
+        Create a PSA module and apply it to an input tensor
+        >>> psa = PSA(c1=128, c2=128, e=0.5)
+        >>> input_tensor = torch.randn(1, 128, 64, 64)
+        >>> output_tensor = psa.forward(input_tensor)
+    """
+
+    def __init__(self, c1: int, c2: int, e: float = 0.5, q: bool=False):
+        """
+        Initialize PSA module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        assert c1 == c2
+        self.c = int(c1 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv(2 * self.c, c1, 1)
+
+        self.attn = QAttention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
+        self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
+        self.fl = FloatFunctional()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Execute forward pass in PSA module.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after attention and feed-forward processing.
+        """
+        a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        b = self.fl.add(b, self.attn(b))
+        b = self.fl.add(b, self.ffn(b))
+        r = self.cv2(self.fl.cat((a, b), 1))
+        return r
+
+class QATC2fCIB(QATC2f):
+    """
+    C2fCIB class represents a convolutional block with C2f and CIB modules.
+
+    Args:
+        c1 (int): Number of input channels.
+        c2 (int): Number of output channels.
+        n (int, optional): Number of CIB modules to stack. Defaults to 1.
+        shortcut (bool, optional): Whether to use shortcut connection. Defaults to False.
+        lk (bool, optional): Whether to use local key connection. Defaults to False.
+        g (int, optional): Number of groups for grouped convolution. Defaults to 1.
+        e (float, optional): Expansion ratio for CIB modules. Defaults to 0.5.
+    """
+
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5
+    ):
+        """
+        Initialize C2fCIB module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of CIB modules.
+            shortcut (bool): Whether to use shortcut connection.
+            lk (bool): Whether to use local key connection.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(QCIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))

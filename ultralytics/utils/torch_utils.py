@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dill
 import functools
 import gc
 import math
@@ -761,6 +762,65 @@ def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, A
     LOGGER.info(f"Optimizer stripped from {f},{f' saved as {s},' if s else ''} {mb:.1f}MB")
     return combined
 
+def strip_optimizer_do_qat(f: str | Path = "best.pt", s: str = "", updates: dict[str, Any] = None) -> dict[str, Any]:
+    """
+    Strip optimizer from 'f' to finalize training, optionally save as 's'.
+
+    Args:
+        f (str | Path): File path to model to strip the optimizer from.
+        s (str, optional): File path to save the model with stripped optimizer to. If not provided, 'f' will be
+            overwritten.
+        updates (dict, optional): A dictionary of updates to overlay onto the checkpoint before saving.
+
+    Returns:
+        (dict): The combined checkpoint dictionary.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> from ultralytics.utils.torch_utils import strip_optimizer
+        >>> for f in Path("path/to/model/checkpoints").rglob("*.pt"):
+        >>>    strip_optimizer(f)
+    """
+    try:
+        x = torch_load(f, map_location=torch.device("cpu"))
+        assert isinstance(x, dict), "checkpoint is not a Python dictionary"
+        assert "model" in x, "'model' missing from checkpoint"
+    except Exception as e:
+        LOGGER.warning(f"Skipping {f}, not a valid Ultralytics model: {e}")
+        return {}
+
+    metadata = {
+        "date": datetime.now().isoformat(),
+        "version": __version__,
+        "license": "AGPL-3.0 License (https://ultralytics.com/license)",
+        "docs": "https://docs.ultralytics.com",
+    }
+
+    # Update model
+    if x.get("ema"):
+        x["model"] = x["ema"]  # replace model with EMA
+    if hasattr(x["model"], "args"):
+        x["model"].args = dict(x["model"].args)  # convert from IterableSimpleNamespace to dict
+    if hasattr(x["model"], "criterion"):
+        x["model"].criterion = None  # strip loss criterion
+    x["model"].half()  # to FP16
+    for p in x["model"].parameters():
+        p.requires_grad = False
+
+    # Update other keys
+    args = {**DEFAULT_CFG_DICT, **x.get("train_args", {})}  # combine args
+    for k in "optimizer", "best_fitness", "ema", "updates":  # keys
+        x[k] = None
+    x["epoch"] = -1
+    x["train_args"] = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # strip non-default keys
+    # x['model'].args = x['train_args']
+
+    # Save
+    combined = {**metadata, **x, **(updates or {})}
+    torch.save(combined, s or f, pickle_module= dill)  # combine dicts (prefer to the right)
+    mb = os.path.getsize(s or f) / 1e6  # file size
+    LOGGER.info(f"Optimizer stripped from {f},{f' saved as {s},' if s else ''} {mb:.1f}MB")
+    return combined
 
 def convert_optimizer_state_dict_to_fp16(state_dict):
     """

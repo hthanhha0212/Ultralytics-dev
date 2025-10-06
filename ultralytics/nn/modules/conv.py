@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.quantization import QuantStub, DeQuantStub
+from torch.nn.quantized import FloatFunctional
 
 __all__ = (
     "Conv",
@@ -806,8 +807,7 @@ class QConcat(nn.Module):
         """
         super().__init__()
         self.d = dimension
-        #self.quant = QuantStub()
-        #self.dequant = DeQuantStub()
+        self.fl = FloatFunctional()
 
     def forward(self, x: List[torch.Tensor]):
         """
@@ -819,7 +819,5 @@ class QConcat(nn.Module):
         Returns:
             (torch.Tensor): Concatenated tensor.
         """
-        #x = [self.quant(item) for item in x]
-        x = torch.cat(x, self.d)
-        #x = [self.dequant(item) for item in x]
+        x = self.fl.cat(x, self.d)
         return x
