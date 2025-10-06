@@ -2582,7 +2582,8 @@ class QDFL(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the DFL module to input tensor and return transformed output."""
         if self.q:
-            x = self.quant(x)
+            if (x.dtype == torch.float32):
+                x = self.quant(x)
         b, _, a = x.shape  # batch, channels, anchors
         if x.dtype in (torch.quint8, torch.qint8):
             x = self.conv(self.sm(x.view(b, 4, self.c1, a).transpose(2, 1))).view(b, 4, a)
