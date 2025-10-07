@@ -792,7 +792,7 @@ class QConv(nn.Module):
 
 class QConcat(nn.Module):
     """
-    Concatenate a list of tensors along specified dimension.
+    Concatenate module that used Quantized Concatenate rather than traditional one.
 
     Attributes:
         d (int): Dimension along which to concatenate tensors.
