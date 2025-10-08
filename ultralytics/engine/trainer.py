@@ -577,6 +577,7 @@ class BaseTrainer:
                 m.eval()
 
     def save_model(self):
+        breakpoint()
         """Save model training checkpoints with additional metadata."""
         import io
 
