@@ -154,7 +154,7 @@ class Model(torch.nn.Module):
         if str(model).endswith((".yaml", ".yml")):
             self._new(model, task=task, verbose=verbose, q=q, do_qat=do_qat)
         else:
-            self._load(model, task=task)
+            self._load(model, task=task, do_qat=do_qat)
 
         # Delete super().training for accessing self.model.training
         del self.training
@@ -275,7 +275,7 @@ class Model(torch.nn.Module):
         self.model.task = self.task
         self.model_name = cfg
 
-    def _load(self, weights: str, task=None) -> None:
+    def _load(self, weights: str, task=None, do_qat=False) -> None:
         """
         Load a model from a checkpoint file or initialize it from a weights file.
 
@@ -301,6 +301,7 @@ class Model(torch.nn.Module):
 
         if str(weights).rpartition(".")[-1] == "pt":
             self.model, self.ckpt = load_checkpoint(weights)
+            self.model.do_qat = do_qat
             self.task = self.model.task
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
             self.ckpt_path = self.model.pt_path
@@ -806,7 +807,9 @@ class Model(torch.nn.Module):
                 self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml, q=self.q)
             self.model = self.trainer.model
 
+        breakpoint()
         self.trainer.train()
+        
         # Update model and cfg after training
         if RANK in {-1, 0}:
             ckpt = self.trainer.best if self.trainer.best.exists() else self.trainer.last
