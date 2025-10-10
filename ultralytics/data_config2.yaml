@@ -1,0 +1,8 @@
+path: /content/DATASET_VER1/DATATSET_VER1 # change if need 
+
+train: images/train
+val: images/val
+
+names:
+    0: license
+    1: vehicle

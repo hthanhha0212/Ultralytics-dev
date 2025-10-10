@@ -95,6 +95,7 @@ from ultralytics.utils.patches import torch_load
 from ultralytics.utils.plotting import feature_visualization
 from ultralytics.utils.torch_utils import (
     fuse_conv_and_bn,
+    fuse_conv_and_bn_qat,
     fuse_deconv_and_bn,
     initialize_weights,
     intersect_dicts,
@@ -359,7 +360,7 @@ class BaseModel(torch.nn.Module):
                 if isinstance(m, (Conv, QConv, Conv2, DWConv)) and hasattr(m, "bn"):
                     if isinstance(m, Conv2):
                         m.fuse_convs()
-                    m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                    m.conv = fuse_conv_and_bn_qat(m.conv, m.bn)  # update conv
                     delattr(m, "bn")  # remove batchnorm
                     m.forward = m.forward_fuse  # update forward
                 if isinstance(m, ConvTranspose) and hasattr(m, "bn"):
