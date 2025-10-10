@@ -469,7 +469,10 @@ class Model(torch.nn.Module):
             >>> # Model is now fused and ready for optimized inference
         """
         self._check_is_pytorch_model()
-        self.model.fuse()
+        if self.do_qat:
+            self.model.fuse_qat()
+        else:
+            self.model.fuse()
 
     def embed(
         self,

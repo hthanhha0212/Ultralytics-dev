@@ -346,6 +346,36 @@ class BaseModel(torch.nn.Module):
 
         return self
 
+    def fuse_qat(self, verbose=True):
+        """
+        Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer for improved computation
+        efficiency.
+
+        Returns:
+            (torch.nn.Module): The fused model is returned.
+        """
+        if not self.is_fused():
+            for m in self.model.modules():
+                if isinstance(m, (Conv, QConv, Conv2, DWConv)) and hasattr(m, "bn"):
+                    if isinstance(m, Conv2):
+                        m.fuse_convs()
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                    delattr(m, "bn")  # remove batchnorm
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, ConvTranspose) and hasattr(m, "bn"):
+                    m.conv_transpose = fuse_deconv_and_bn(m.conv_transpose, m.bn)
+                    delattr(m, "bn")  # remove batchnorm
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, RepConv):
+                    m.fuse_convs()
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, (RepVGGDW, QRepVGGDW)):
+                    m.fuse()
+                    m.forward = m.forward_fuse
+            self.info(verbose=verbose)
+
+        return self
+    
     def is_fused(self, thresh=10):
         """
         Check if the model has less than a certain threshold of BatchNorm layers.
