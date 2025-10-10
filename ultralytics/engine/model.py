@@ -561,7 +561,8 @@ class Model(torch.nn.Module):
                 self.predictor.save_dir = get_save_dir(self.predictor.args)
         if prompts and hasattr(self.predictor, "set_prompts"):  # for SAM-type models
             self.predictor.set_prompts(prompts)
-        return self.predictor.predict_cli(source=source) if is_cli else self.predictor(source=source, stream=stream)
+        return self.predictor.predict_cli(source=source, **kwargs) if is_cli else self.predictor(source=source, stream=stream, **kwargs)
+        #return self.predictor.predict_cli(source=source) if is_cli else self.predictor(source=source, stream=stream)
 
     def track(
         self,
@@ -807,7 +808,6 @@ class Model(torch.nn.Module):
                 self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml, q=self.q)
             self.model = self.trainer.model
 
-        breakpoint()
         self.trainer.train()
         
         # Update model and cfg after training
