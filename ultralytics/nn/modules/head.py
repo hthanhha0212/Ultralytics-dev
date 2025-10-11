@@ -1315,7 +1315,7 @@ class QDetect(nn.Module):
                 for x in ch
             )
         )
-        self.dfl = QDFL(self.reg_max, q=True) if self.reg_max > 1 else nn.Identity()
+        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fl = FloatFunctional()

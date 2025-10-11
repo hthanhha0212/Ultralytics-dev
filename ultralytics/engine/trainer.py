@@ -717,6 +717,8 @@ class BaseTrainer:
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad()
+          
+          
         if self.ema:
             self.ema.update(self.model)
 
