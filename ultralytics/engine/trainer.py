@@ -178,6 +178,9 @@ class BaseTrainer:
         # Callbacks
         self.callbacks = _callbacks or callbacks.get_default_callbacks()
 
+        # QAT 
+        self.do_qat_ema_update_first_time = True
+
         if isinstance(self.args.device, str) and len(self.args.device):  # i.e. device='0' or device='0,1,2,3'
             world_size = len(self.args.device.split(","))
         elif isinstance(self.args.device, (tuple, list)):  # i.e. device=[0, 1, 2, 3] (multi-GPU from CLI is list)
@@ -717,8 +720,11 @@ class BaseTrainer:
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad()
-          
-          
+
+        if self.model.do_qat and self.do_qat_ema_update_first_time:
+            self.ema = ModelEMA(self.model)
+            self.do_qat_ema_update_first_time = False
+
         if self.ema:
             self.ema.update(self.model)
 
