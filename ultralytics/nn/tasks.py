@@ -104,6 +104,9 @@ from ultralytics.utils.torch_utils import (
     smart_inference_mode,
     time_sync,
 )
+
+from ultralytics.myimplm.comparer import compare_tensors, compare_list
+from ultralytics.myimplm.forwarder import Forward_Custom_Module
 from torch.ao.quantization import QuantStub, DeQuantStub
 
 class BaseModel(torch.nn.Module):
@@ -131,13 +134,16 @@ class BaseModel(torch.nn.Module):
         >>> model = BaseModel()
         >>> model.info()  # Display model information
     """
-    def __init__(self, q: bool= False, do_qat: bool= False):
+    def __init__(self, q: bool= False, do_qat: bool= False, do_compare: bool=False):
         super().__init__()
         self.q = q
         self.do_qat = do_qat
         if self.do_qat or q:
             self.quant = QuantStub()
             self.dequant = DeQuantStub()
+        
+        self.do_compare = do_compare
+        self.log_cmpr = False 
 
     def forward(self, x, *args, **kwargs):
         """
@@ -173,6 +179,8 @@ class BaseModel(torch.nn.Module):
         """
         if augment:
             return self._predict_augment(x)
+        if self.do_compare:
+            return self._predict_once_do_compare(x, profile, visualize, embed)
         if self.do_qat:
             return self._predict_once_do_qat(x, profile, visualize, embed)
         if self.q: 
@@ -281,6 +289,92 @@ class BaseModel(torch.nn.Module):
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
         return x
 
+    def _predict_once_do_compare(self, x, profile=False, visualize=False, embed=None):
+        """
+        Perform a forward pass through the network.
+
+        Args:
+            x (torch.Tensor): The input tensor to the model.
+            profile (bool): Print the computation time of each layer if True.
+            visualize (bool): Save the feature maps of the model if True.
+            embed (list, optional): A list of feature vectors/embeddings to return.
+
+        Returns:
+            (torch.Tensor): The last output of the model.
+        """
+        x = self.quant(x)
+        x_cus = x.clone()
+        y, dt, embeddings = [], [], []  # outputs
+        y_cus = []
+        embed = frozenset(embed) if embed is not None else {-1}
+        max_idx = max(embed)
+        name_width, value_width = 28, 12
+
+        def format_value(value):
+            if value is None:
+                return f"{'-':>{value_width}}"
+            if isinstance(value, torch.Tensor):
+                value = value.item()
+            return f"{value:>{value_width}.6f}"
+
+        def log_comparison_row(block_name, mae=None, det_mae=None, det_y=None):
+            if not self.log_cmpr:
+                return
+            LOGGER.info(
+                f"{block_name:<{name_width}}"
+                f"{format_value(mae)}"
+                f"{format_value(det_mae)}"
+                f"{format_value(det_y)}"
+            )
+
+        if self.log_cmpr:
+            header = (
+                f"{'Block':<{name_width}}"
+                f"{'MAE':>{value_width}}"
+                f"{'DET_MAE':>{value_width}}"
+                f"{'DET_Y':>{value_width}}"
+            )
+            LOGGER.info(header)
+            LOGGER.info("-" * len(header))
+        for m in self.model:
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                x_cus = y_cus[m.f] if isinstance(m.f, int) else [x_cus if j == -1 else y_cus[j] for j in m.f]
+            if profile:
+                self._profile_one_layer(m, x, dt)
+
+            if not isinstance(m, (torch.nn.modules.upsampling.Upsample)):
+                x_cus = Forward_Custom_Module(m, x_cus)
+                x = m(x)
+                if not isinstance(m, Qv10Detect):
+                    mae = compare_tensors(x.dequantize(), x_cus.dequantize())
+                    log_comparison_row(m.__class__.__name__, mae=mae)
+                else:
+                    if m.training:
+                        avg_mae = compare_list(x['one2one'], x_cus['one2one'])
+                        log_comparison_row(m.__class__.__name__, det_mae=avg_mae)
+                    else:
+                        avg_y = compare_tensors(x[0].dequantize(), x_cus[0].dequantize())
+                        avg_mae = compare_list(x[1]['one2one'], x_cus[1]['one2one'])
+                        log_comparison_row(m.__class__.__name__, det_mae=avg_mae, det_y=avg_y)
+                        if (avg_y != 0. or avg_mae != 0.):
+                            LOGGER.warning(
+                                "Final results does not match with reference results "
+                            )
+            else:
+                x = m(x)
+                x_cus = m(x_cus)
+
+            y.append(x if m.i in self.save else None)  # save output
+            y_cus.append(x if m.i in self.save else None) 
+            if visualize:
+                feature_visualization(x_cus, m.type, m.i, save_dir=visualize)
+            if m.i in embed:
+                embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x_cus, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
+                if m.i == max_idx:
+                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
+        return x_cus
+
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
         LOGGER.warning(
@@ -314,6 +408,10 @@ class BaseModel(torch.nn.Module):
         LOGGER.info(f"{dt[-1]:10.2f} {flops:10.2f} {m.np:10.0f}  {m.type}")
         if c:
             LOGGER.info(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
+
+    def compare_mode(self, log=True):
+        self.do_compare = True
+        self.log_cmpr= log
 
     def fuse(self, verbose=True):
         """
@@ -496,7 +594,7 @@ class DetectionModel(BaseModel):
         >>> results = model.predict(image_tensor)
     """
 
-    def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True, q= False, do_qat= False):
+    def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True, q= False, do_qat= False, do_compare=False):
         """
         Initialize the YOLO detection model with the given config and parameters.
 
@@ -506,7 +604,7 @@ class DetectionModel(BaseModel):
             nc (int, optional): Number of classes.
             verbose (bool): Whether to display model information.
         """
-        super().__init__(q=q, do_qat=do_qat)
+        super().__init__(q=q, do_qat=do_qat, do_compare=do_compare)
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
         if self.yaml["backbone"][0][2] == "Silence":
             LOGGER.warning(

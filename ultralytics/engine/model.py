@@ -85,7 +85,8 @@ class Model(torch.nn.Module):
         task: str = None,
         verbose: bool = False,
         q: bool = False,
-        do_qat: bool = False
+        do_qat: bool = False,
+        do_compare: bool = False
     ) -> None:
         """
         Initialize a new instance of the YOLO model class.
@@ -130,6 +131,7 @@ class Model(torch.nn.Module):
         self.model_name = None  # model name
         self.q = q # quantization
         self.do_qat = do_qat 
+        self.do_compare = do_compare
         model = str(model).strip()
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
@@ -152,9 +154,9 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose, q=q, do_qat=do_qat)
+            self._new(model, task=task, verbose=verbose, q=q, do_qat=do_qat, do_compare=do_compare)
         else:
-            self._load(model, task=task, do_qat=do_qat)
+            self._load(model, task=task, q=q, do_qat=do_qat, do_compare=do_compare)
 
         # Delete super().training for accessing self.model.training
         del self.training
@@ -239,7 +241,7 @@ class Model(torch.nn.Module):
 
         return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False, q=False, do_qat=False) -> None:
+    def _new(self, cfg: str, task=None, model=None, verbose=False, q=False, do_qat=False, do_compare=False) -> None:
         """
         Initialize a new model and infer the task type from model definitions.
 
@@ -266,7 +268,8 @@ class Model(torch.nn.Module):
         self.task = task or guess_model_task(cfg_dict)
         self.q = q
         self.do_qat = do_qat
-        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q, do_qat=do_qat)  # build model
+        self.do_compare = do_compare
+        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, q=q, do_qat=do_qat, do_compare=do_compare)  # build model
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
 
@@ -275,7 +278,7 @@ class Model(torch.nn.Module):
         self.model.task = self.task
         self.model_name = cfg
 
-    def _load(self, weights: str, task=None, do_qat=False) -> None:
+    def _load(self, weights: str, task=None, q=False, do_qat=False, do_compare=False) -> None:
         """
         Load a model from a checkpoint file or initialize it from a weights file.
 
@@ -301,7 +304,9 @@ class Model(torch.nn.Module):
 
         if str(weights).rpartition(".")[-1] == "pt":
             self.model, self.ckpt = load_checkpoint(weights)
+            self.model.q = q
             self.model.do_qat = do_qat
+            self.model.do_compare = do_compare
             self.task = self.model.task
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
             self.ckpt_path = self.model.pt_path

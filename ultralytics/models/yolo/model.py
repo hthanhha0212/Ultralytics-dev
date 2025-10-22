@@ -51,7 +51,7 @@ class YOLO(Model):
         >>> model = YOLO("yolo11n.yaml")
     """
 
-    def __init__(self, model: str | Path = "yolo11n.pt", task: str | None = None, verbose: bool = False, q: bool = False, do_qat: bool = False):
+    def __init__(self, model: str | Path = "yolo11n.pt", task: str | None = None, verbose: bool = False, q: bool = False, do_qat: bool = False, do_compare: bool = False):
         """
         Initialize a YOLO model.
 
@@ -80,7 +80,7 @@ class YOLO(Model):
             self.__dict__ = new_instance.__dict__
         else:
             # Continue with default YOLO initialization
-            super().__init__(model=model, task=task, verbose=verbose, q=q, do_qat=do_qat)
+            super().__init__(model=model, task=task, verbose=verbose, q=q, do_qat=do_qat, do_compare=do_compare)
             if hasattr(self.model, "model") and "RTDETR" in self.model.model[-1]._get_name():  # if RTDETR head
                 from ultralytics import RTDETR
 
