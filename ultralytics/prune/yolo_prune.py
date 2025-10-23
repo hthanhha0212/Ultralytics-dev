@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from ultralytics import YOLO, __version__
-from ultralytics.nn.modules import Detect, QC2f, Conv, Bottleneck, QC2fCIB, QPSA, SCDown, Qv10Detect, SPPF
+from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QC2fCIB, QPSA, Qv10Detect
 from ultralytics.nn.tasks import torch_safe_load, load_checkpoint
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.utils import YAML, LOGGER, RANK, DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS
@@ -117,7 +117,7 @@ class C2f_v2(nn.Module):
         self.cv0 = Conv(c1, self.c, 1, 1)
         self.cv1 = Conv(c1, self.c, 1, 1)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
 
     def forward(self, x):
         # y = list(self.cv1(x).chunk(2, 1))
@@ -401,7 +401,6 @@ def prune(args):
             print("Pruning early stop")
             break
 
-    breakpoint()
     #model.export(format='onnx')
 
 
