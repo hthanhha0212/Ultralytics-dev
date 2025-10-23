@@ -299,7 +299,7 @@ def prune(args):
     # use coco128 dataset for 10 epochs fine-tuning each pruning iteration step
     # this part is only for sample code, number of epochs should be included in config file
     pruning_cfg['data'] = "data_config.yaml"
-    pruning_cfg['epochs'] = 5 
+    pruning_cfg['epochs'] = 10 
 
     model.model.train()
     replace_c2f_with_c2f_v2(model.model)
