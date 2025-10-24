@@ -144,6 +144,7 @@ class BaseModel(torch.nn.Module):
         
         self.do_compare = do_compare
         self.log_cmpr = False 
+        self.profile = False
 
     def forward(self, x, *args, **kwargs):
         """
@@ -177,6 +178,7 @@ class BaseModel(torch.nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
+        profile = self.profile
         if augment:
             return self._predict_augment(x)
         if self.do_compare:
