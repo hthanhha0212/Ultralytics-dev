@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from ultralytics import YOLO, __version__
-from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QC2fCIB, QPSA, Qv10Detect
+from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QCIB, QC2fCIB, QPSA, Qv10Detect
 from ultralytics.nn.tasks import torch_safe_load, load_checkpoint
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.utils import YAML, LOGGER, RANK, DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS
@@ -108,6 +108,10 @@ def infer_shortcut(bottleneck):
     c2 = bottleneck.cv2.conv.out_channels
     return c1 == c2 and hasattr(bottleneck, 'add') and bottleneck.add
 
+def infer_shortcut_cib(cib):
+    c1 = cib.cv1[0].conv.in_channels
+    c2 = cib.cv1[4].conv.in_channels
+    return c1 == c2 and hasattr(cib, 'add') and cib.add 
 
 class C2f_v2(nn.Module):
     # CSP Bottleneck with 2 convolutions
@@ -125,6 +129,50 @@ class C2f_v2(nn.Module):
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))
 
+class C2fCIB_v2(C2f_v2):
+    """
+    Quantized C2fCIB block used Quantized C2f and Quantized CIB modules.
+
+    Args:
+        c1 (int): Number of input channels.
+        c2 (int): Number of output channels.
+        n (int, optional): Number of CIB modules to stack. Defaults to 1.
+        shortcut (bool, optional): Whether to use shortcut connection. Defaults to False.
+        lk (bool, optional): Whether to use local key connection. Defaults to False.
+        g (int, optional): Number of groups for grouped convolution. Defaults to 1.
+        e (float, optional): Expansion ratio for CIB modules. Defaults to 0.5.
+    """
+
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5
+    ):
+        """
+        Initialize C2fCIB module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of CIB modules.
+            shortcut (bool): Whether to use shortcut connection.
+            lk (bool): Whether to use local key connection.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(QCIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))
+
+def replace_c2fcib_with_c2fcib_v2(module):
+    for name, child_module in module.named_children():
+        if isinstance(child_module, QC2fCIB):
+            # Replace C2f with C2f_v2 while preserving its parameters
+            shortcut = infer_shortcut_cib(child_module.m[0])
+            c2fcib_v2 = C2fCIB_v2(child_module.cv1.conv.in_channels, child_module.cv2.conv.out_channels,
+                            n=len(child_module.m), shortcut=shortcut,
+                            e=child_module.c / child_module.cv2.conv.out_channels)
+            transfer_weights(child_module, c2fcib_v2)
+            setattr(module, name, c2fcib_v2)
+        else:
+            replace_c2fcib_with_c2fcib_v2(child_module)
 
 def transfer_weights(c2f, c2f_v2):
     c2f_v2.cv2 = c2f.cv2
@@ -299,10 +347,11 @@ def prune(args):
     # use coco128 dataset for 10 epochs fine-tuning each pruning iteration step
     # this part is only for sample code, number of epochs should be included in config file
     pruning_cfg['data'] = "data_config.yaml"
-    pruning_cfg['epochs'] = 10 
+    pruning_cfg['epochs'] = 5 
 
     model.model.train()
     replace_c2f_with_c2f_v2(model.model)
+    replace_c2fcib_with_c2fcib_v2(model.model)
     initialize_weights(model.model)  # set BN.eps, momentum, ReLU.inplace
 
     for name, param in model.model.named_parameters():
@@ -338,7 +387,7 @@ def prune(args):
         ignored_layers = []
         unwrapped_parameters = []
         for m in model.model.modules():
-            if isinstance(m, (QPSA, QC2fCIB, Qv10Detect)):
+            if isinstance(m, (QPSA, Qv10Detect)):
                 ignored_layers.append(m)
 
         example_inputs = example_inputs.to(model.device)
@@ -411,7 +460,7 @@ if __name__ == "__main__":
                         help='Pruning config file.'
                              ' This file should have same format with ultralytics/yolo/cfg/default.yaml')
     parser.add_argument('--iterative-steps', default=16, type=int, help='Total pruning iteration step')
-    parser.add_argument('--target-prune-rate', default=0.5, type=float, help='Target pruning rate')
+    parser.add_argument('--target-prune-rate', default=0.6, type=float, help='Target pruning rate')
     parser.add_argument('--max-map-drop', default=0.2, type=float, help='Allowed maximum map drop after fine-tuning')
 
     args = parser.parse_args()
