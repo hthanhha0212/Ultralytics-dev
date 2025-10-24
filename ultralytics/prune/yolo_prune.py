@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from ultralytics import YOLO, __version__
-from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QCIB, QC2fCIB, QPSA, Qv10Detect
+from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QCIB, QC2fCIB, QAttention, QPSA, Qv10Detect
 from ultralytics.nn.tasks import torch_safe_load, load_checkpoint
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.utils import YAML, LOGGER, RANK, DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS
@@ -387,7 +387,7 @@ def prune(args):
         ignored_layers = []
         unwrapped_parameters = []
         for m in model.model.modules():
-            if isinstance(m, (QPSA, Qv10Detect)):
+            if isinstance(m, (QAttention, Qv10Detect)):
                 ignored_layers.append(m)
 
         example_inputs = example_inputs.to(model.device)
