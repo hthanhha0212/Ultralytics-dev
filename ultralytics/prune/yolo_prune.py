@@ -455,7 +455,7 @@ def prune(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='ultralytics/trainedmodel/runs_number3/detect/train/weights/best.pt', help='Pretrained pruning target model file')
+    parser.add_argument('--model', default='ultralytics/pretrained/weights/best.pt', help='Pretrained pruning target model file')
     parser.add_argument('--cfg', default='default.yaml',
                         help='Pruning config file.'
                              ' This file should have same format with ultralytics/yolo/cfg/default.yaml')
