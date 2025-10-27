@@ -1,4 +1,4 @@
-path: /kaggle/input/fpga-dataset-ver1/DATATSET_VER1 # change if need 
+path: /kaggle/input/fpga-dataset-full/FullDataset # change if need 
 
 train: images/train
 val: images/val
