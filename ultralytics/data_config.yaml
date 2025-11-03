@@ -1,4 +1,4 @@
-path: /kaggle/input/fpga-dataset-full/FullDataset/FullDataset # change if need
+path: /kaggle/input/alprdataset/dataset_merged # change if need
 
 train: images/train
 val: images/val
