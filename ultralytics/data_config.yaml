@@ -4,5 +4,5 @@ train: images/train
 val: images/val
 
 names:
-    0: license
-    1: vehicle
+    0: vehicle 
+    1: license 
