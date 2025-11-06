@@ -11,6 +11,8 @@ from typing import List, Union, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.quantized import FloatFunctional 
+
 from matplotlib import pyplot as plt
 from ultralytics import YOLO, __version__
 from ultralytics.nn.modules import QC2f, Conv, QBottleneck, QCIB, QC2fCIB, QAttention, QPSA, Qv10Detect
@@ -153,12 +155,13 @@ class C2f_v2(nn.Module):
         self.cv1 = Conv(c1, self.c, 1, 1)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(QBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.fl = FloatFunctional()
 
     def forward(self, x):
         # y = list(self.cv1(x).chunk(2, 1))
         y = [self.cv0(x), self.cv1(x)]
         y.extend(m(y[-1]) for m in self.m)
-        return self.cv2(torch.cat(y, 1))
+        return self.cv2(self.fl.cat(y, 1))
 
 class C2fCIB_v2(C2f_v2):
     """
@@ -415,7 +418,7 @@ def prune(args):
     # use coco128 dataset for 10 epochs fine-tuning each pruning iteration step
     # this part is only for sample code, number of epochs should be included in config file
     pruning_cfg['data'] = "data_config.yaml"
-    pruning_cfg['epochs'] = 5 
+    pruning_cfg['epochs'] = 10 
 
     model.model.train()
     replace_c2f_with_c2f_v2(model.model)
