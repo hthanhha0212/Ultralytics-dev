@@ -1,0 +1,29 @@
+{
+  "target_prune_rate": 0.6,
+  "iterative_steps": 16,
+  "current_step": 2,
+  "macs_list": [
+    5068500800.0,
+    4759296000.0,
+    4474311200.0
+  ],
+  "nparams_list": [
+    100.0,
+    92.97877997798967,
+    86.80244624827353
+  ],
+  "map_list": [
+    0.7654302207647141,
+    0.7605401333966755,
+    0.7591758335372507
+  ],
+  "pruned_map_list": [
+    0.7654302207647141,
+    0.6605903087920193,
+    0.6400309793754008
+  ],
+  "last_model_path": "/kaggle/working/Ultralytics-dev/runs/detect/step_1_finetune/weights/best.pt",
+  "base_macs": 5068500800.0,
+  "base_nparams": 2707820.0,
+  "init_map": 0.7654302207647141
+}
