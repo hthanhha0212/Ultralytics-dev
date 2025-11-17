@@ -1,7 +1,12 @@
 task: detect
 mode: train
+<<<<<<< HEAD
 model: /kaggle/working/Ultralytics-dev/runs/detect/train2/weights/last.pt
 data: /kaggle/working/Ultralytics-dev/ultralytics/data_config.yaml
+=======
+model: qyolov10n.yaml
+data: data_config.yaml
+>>>>>>> 2e2c242a286fefa19f09178edd7b337338cb3443
 epochs: 150
 time: null
 patience: 100
@@ -24,7 +29,11 @@ single_cls: false
 rect: false
 cos_lr: false
 close_mosaic: 10
+<<<<<<< HEAD
 resume: /kaggle/working/Ultralytics-dev/runs/detect/train2/weights/last.pt
+=======
+resume: false
+>>>>>>> 2e2c242a286fefa19f09178edd7b337338cb3443
 amp: true
 fraction: 1.0
 profile: false
@@ -76,7 +85,11 @@ momentum: 0.937
 weight_decay: 0.0005
 warmup_epochs: 3.0
 warmup_momentum: 0.8
+<<<<<<< HEAD
 warmup_bias_lr: 0.0
+=======
+warmup_bias_lr: 0.1
+>>>>>>> 2e2c242a286fefa19f09178edd7b337338cb3443
 box: 7.5
 cls: 0.5
 dfl: 1.5
