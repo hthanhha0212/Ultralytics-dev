@@ -398,7 +398,16 @@ class BaseModel(torch.nn.Module):
             thop = None  # conda support without 'ultralytics-thop' installed
 
         c = m == self.model[-1] and isinstance(x, list)  # is final layer list, copy input as inplace fix
-        flops = thop.profile(m, inputs=[x.copy() if c else x], verbose=False)[0] / 1e9 * 2 if thop else 0  # GFLOPs
+        if thop:
+            try:
+                flops = thop.profile(m, inputs=[x.copy() if c else x], verbose=False)[0] / 1e9 * 2  # GFLOPs
+            except Exception as e:
+                LOGGER.warning(f"THOP profiling failed for {m.type}: {e}")
+                flops = 0
+            finally:
+                self._clear_thop_profile(m)  # thop 0.1.1 can leak hooks that break later forwards
+        else:
+            flops = 0
         t = time_sync()
         for _ in range(10):
             m(x.copy() if c else x)
@@ -408,6 +417,19 @@ class BaseModel(torch.nn.Module):
         LOGGER.info(f"{dt[-1]:10.2f} {flops:10.2f} {m.np:10.0f}  {m.type}")
         if c:
             LOGGER.info(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
+
+    @staticmethod
+    def _clear_thop_profile(module):
+        """Remove leftover thop profiling hooks/buffers that can break subsequent forwards."""
+        for mod in module.modules():
+            for k, hook in list(mod._forward_hooks.items()):
+                if getattr(hook, "__module__", "").startswith("thop"):
+                    mod._forward_hooks.pop(k, None)
+            for attr in ("total_ops", "total_params"):
+                if attr in mod._buffers:
+                    mod._buffers.pop(attr, None)
+                elif hasattr(mod, attr):
+                    delattr(mod, attr)
 
     def compare_mode(self, log=True):
         self.do_compare = True
