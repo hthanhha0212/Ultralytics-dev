@@ -1,8 +1,7 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Custom Quantized 2D convolution."""
 
 from __future__ import annotations
-
-from typing import Optional, Tuple
 
 import torch
 from torch import Tensor, nn
@@ -12,10 +11,10 @@ __all__ = ("CustomConv2d",)
 
 
 class CustomConv2d(nn.Module):
-    """This 2D convolution module operating on intergers inputs (uint8) and interger weights (int8) and return int32 outputs.
+    """This 2D convolution module operating on integers inputs (uint8) and integer weights (int8) and return int32
+    outputs.
 
-    The implementation performs the convolution entirely with integer arithmetic.
-    Inputs are expected in NCHW format.
+    The implementation performs the convolution entirely with integer arithmetic. Inputs are expected in NCHW format.
     """
 
     def __init__(
@@ -37,10 +36,10 @@ class CustomConv2d(nn.Module):
 
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size: Tuple[int, int] = _pair(kernel_size)
-        self.stride: Tuple[int, int] = _pair(stride)
-        self.padding: Tuple[int, int] = _pair(padding)
-        self.dilation: Tuple[int, int] = _pair(dilation)
+        self.kernel_size: tuple[int, int] = _pair(kernel_size)
+        self.stride: tuple[int, int] = _pair(stride)
+        self.padding: tuple[int, int] = _pair(padding)
+        self.dilation: tuple[int, int] = _pair(dilation)
         self.groups = groups
 
         weight_shape = (
@@ -79,7 +78,7 @@ class CustomConv2d(nn.Module):
             raise ValueError("Input channel dimension mismatch.")
         if self.groups > 1 and self.in_channels % self.groups != 0:
             raise ValueError("Grouped convolution requires divisible in_channels.")
-        
+
         input_int = input.to(torch.int32) - int(self.x_zero_point)
         weight_int = self.weight.to(torch.int32) - self.w_zero_point.to(torch.int32).view(-1, 1, 1, 1)
 
@@ -116,14 +115,10 @@ class CustomConv2d(nn.Module):
 
         for oy in range(out_h):
             h_start = oy * s_h
-            h_slice = slice(
-                h_start, h_start + d_h * (k_h - 1) + 1, d_h
-            )
+            h_slice = slice(h_start, h_start + d_h * (k_h - 1) + 1, d_h)
             for ox in range(out_w):
                 w_start = ox * s_w
-                w_slice = slice(
-                    w_start, w_start + d_w * (k_w - 1) + 1, d_w
-                )
+                w_slice = slice(w_start, w_start + d_w * (k_w - 1) + 1, d_w)
                 patch = input_padded[:, :, h_slice, w_slice]
 
                 for group_idx in range(self.groups):
@@ -136,25 +131,19 @@ class CustomConv2d(nn.Module):
                     patch_flat = patch_group.reshape(n, -1)
 
                     weight_group = weight_groups[group_idx].reshape(out_per_group, -1)
-                    contribution = torch.matmul(
-                        patch_flat, weight_group.t()
-                    )
+                    contribution = torch.matmul(patch_flat, weight_group.t())
                     output[:, o_start:o_end, oy, ox] = contribution
 
         return output
 
-    def _output_dims(self, h_in: int, w_in: int) -> Tuple[int, int]:
+    def _output_dims(self, h_in: int, w_in: int) -> tuple[int, int]:
         kernel_h, kernel_w = self.kernel_size
         pad_h, pad_w = self.padding
         stride_h, stride_w = self.stride
         dil_h, dil_w = self.dilation
 
-        out_h = (
-            (h_in + 2 * pad_h - dil_h * (kernel_h - 1) - 1) // stride_h
-        ) + 1
-        out_w = (
-            (w_in + 2 * pad_w - dil_w * (kernel_w - 1) - 1) // stride_w
-        ) + 1
+        out_h = ((h_in + 2 * pad_h - dil_h * (kernel_h - 1) - 1) // stride_h) + 1
+        out_w = ((w_in + 2 * pad_w - dil_w * (kernel_w - 1) - 1) // stride_w) + 1
         if out_h <= 0 or out_w <= 0:
             raise ValueError("Calculated output size is non-positive.")
         return out_h, out_w
@@ -172,7 +161,7 @@ class CustomConv2d(nn.Module):
         padded[:, :, pad_h : pad_h + h, pad_w : pad_w + w] = input_tensor
         return padded
 
-    def load_int8_weight(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
+    def load_int8_weight(self, weight: Tensor, bias: Tensor | None = None) -> None:
         """Load integer weights (and optional bias) into the module."""
         if weight.dtype != torch.int8:
             raise TypeError("weight must use dtype=torch.int8.")
@@ -191,9 +180,8 @@ class CustomConv2d(nn.Module):
         self.is_loaded = True
 
     def sample_qparams(self, qconv_obj: torch.ao.nn.quantized.modules.conv.Conv2d):
-        """
-        This method will copy all the quantization paramters from one reference object
-        to itself. Additional, transfer all the weights if not loaded
+        """This method will copy all the quantization parameters from one reference object to itself. Additional,
+        transfer all the weights if not loaded.
         """
         self.scale = qconv_obj.scale
         self.zero_point = qconv_obj.zero_point
@@ -205,9 +193,7 @@ class CustomConv2d(nn.Module):
             self.load_int8_weight(weight=weight_tensor, bias=None)
 
     def post_process_output(self, output: torch.Tensor):
-        """
-        This method process the intenger output to produce the final output 
-        """
+        """This method process the intenger output to produce the final output."""
         scale_prod = (self.x_scale * self.w_scale).to(torch.float64).view(1, -1, 1, 1)
         output = output.to(torch.float64) * scale_prod + self.bias_tensor
         output = torch.round(output / self.scale) + self.zero_point

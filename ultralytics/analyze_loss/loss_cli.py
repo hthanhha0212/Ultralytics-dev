@@ -1,3 +1,4 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """
 GPU-oriented loss analysis tool for Ultralytics YOLO detection models.
 
@@ -8,9 +9,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import torch
 
@@ -100,7 +101,9 @@ def compute_losses(
     cfg.task = "detect"
     cfg.data = data_cfg
     cfg.workers = workers
-    dataset = build_yolo_dataset(cfg, img_path=split_path, batch=batch, data=data_cfg, mode="val", rect=True, stride=stride)
+    dataset = build_yolo_dataset(
+        cfg, img_path=split_path, batch=batch, data=data_cfg, mode="val", rect=True, stride=stride
+    )
     dataloader = build_dataloader(dataset, batch=batch, workers=workers, shuffle=False, rank=-1, drop_last=False)
 
     iterator = TQDM(dataloader, total=len(dataset), desc="Loss", unit="img") if show_progress else dataloader

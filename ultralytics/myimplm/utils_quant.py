@@ -1,27 +1,30 @@
-import torch
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 from collections import namedtuple
+
+import torch
 from torch.ao.nn.quantized.modules.conv import Conv2d as QConv2d
 
 __all__ = (
+    "QuantParams",
+    "compare_list",
+    "compare_tensors",
     "customize_quantize",
     "dequantize_per_tensor",
-    "compare_tensors",
-    "compare_list",
-    "get_quant_params_tensor",
     "get_quant_params_qconv2d",
-    "QuantParams",
+    "get_quant_params_tensor",
 )
 
 _QRANGES = {
-    torch.quint8:  (0, 255),
-    torch.qint8:   (-128, 127),
-    torch.qint32:  (-2**31, 2**31 - 1),
+    torch.quint8: (0, 255),
+    torch.qint8: (-128, 127),
+    torch.qint32: (-(2**31), 2**31 - 1),
 }
 
+
 def customize_quantize(x: torch.Tensor, *, scale: float, zero_point: int, dtype: torch.dtype):
-    """
-    Functional reimplementation of torch.quantize_per_tensor (per-tensor affine).
-    Returns an integer tensor of the requested dtype (not a PyTorch QuantizedTensor).
+    """Functional reimplementation of torch.quantize_per_tensor (per-tensor affine). Returns an integer tensor of the
+    requested dtype (not a PyTorch QuantizedTensor).
     """
     if dtype not in _QRANGES:
         raise ValueError(f"Unsupported dtype {dtype}. Use torch.quint8, torch.qint8, or torch.qint32.")
@@ -42,16 +45,14 @@ def customize_quantize(x: torch.Tensor, *, scale: float, zero_point: int, dtype:
     q = torch.clamp(q, qmin, qmax)
     return q.to(torch.uint8)
 
+
 def dequantize_per_tensor(q: torch.Tensor, *, scale: float, zero_point: int) -> torch.Tensor:
-    """
-    Inverse of the above: returns a float tensor.
-    """
+    """Inverse of the above: returns a float tensor."""
     return (q.to(torch.float32) - zero_point) * scale
 
+
 def compare_tensors(t1: torch.Tensor, t2: torch.Tensor, log: bool = False):
-    """
-    Compare two tensors elementwise and compute overall MAE.
-    Works safely for both float and integer tensors.
+    """Compare two tensors elementwise and compute overall MAE. Works safely for both float and integer tensors.
 
     Args:
         t1 (torch.Tensor): First tensor.
@@ -72,7 +73,7 @@ def compare_tensors(t1: torch.Tensor, t2: torch.Tensor, log: bool = False):
 
     diff = (t1 - t2).abs()
 
-    mismatched = (diff != 0)
+    mismatched = diff != 0
 
     if log:
         indices = mismatched.nonzero(as_tuple=False)
@@ -83,9 +84,9 @@ def compare_tensors(t1: torch.Tensor, t2: torch.Tensor, log: bool = False):
     mae = diff.mean().item()
     return mae
 
+
 def compare_list(l1: list, l2: list, log: bool = False):
-    """
-    Compare two lists for each coresponding tensor and compute overall MAE.
+    """Compare two lists for each corresponding tensor and compute overall MAE.
 
     Args:
         l1 (torch.Tensor): First list.
@@ -93,7 +94,7 @@ def compare_list(l1: list, l2: list, log: bool = False):
         log (bool): If True, print mismatched indices and values.
 
     Returns:
-        float: Avarage Mean Absolute Error (MAE) between the two list.
+        float: Average Mean Absolute Error (MAE) between the two list.
     """
     if len(l1) != len(l2):
         print(f"[Error] Length mismatch: {len(l1)} vs {len(l2)}")
@@ -101,27 +102,27 @@ def compare_list(l1: list, l2: list, log: bool = False):
 
     l1_clone = [t.clone() for t in l1]
     l2_clone = [t.clone() for t in l2]
-    
+
     l = len(l1_clone)
     mae_list = []
     for i in range(l):
         mae_list.append(compare_tensors(l1_clone[i].dequantize(), l2_clone[i].dequantize(), log))
 
     if log:
-        print("Mae Summay")
+        print("Mae Summary")
         for i in range(l):
             print("Mae [", i, "] =", mae_list[i])
 
-    avg_mae = sum(mae_list) / l 
+    avg_mae = sum(mae_list) / l
 
     return avg_mae
 
+
 QuantParams = namedtuple("QuantParams", ["scale", "zero_point", "dtype"])
 
+
 def get_quant_params_tensor(tensor: torch.Tensor):
-    """
-    Retrieve quantization parameters (scale, zero_point, dtype)
-    from a quantized tensor and return them as an object.
+    """Retrieve quantization parameters (scale, zero_point, dtype) from a quantized tensor and return them as an object.
 
     Args:
         tensor (torch.Tensor): The quantized tensor.
@@ -132,16 +133,12 @@ def get_quant_params_tensor(tensor: torch.Tensor):
     if not tensor.is_quantized:
         return QuantParams(scale=None, zero_point=None, dtype=tensor.dtype)
 
-    return QuantParams(
-        scale=tensor.q_scale(),
-        zero_point=tensor.q_zero_point(),
-        dtype=tensor.dtype
-    )
+    return QuantParams(scale=tensor.q_scale(), zero_point=tensor.q_zero_point(), dtype=tensor.dtype)
+
 
 def get_quant_params_qconv2d(qconv2d: QConv2d):
-    """
-    Retrieve quantization parameters (scale, zero_point, dtype)
-    from a quantized conv2d object and  return them as an object.
+    """Retrieve quantization parameters (scale, zero_point, dtype) from a quantized conv2d object and return them as an
+    object.
 
     Args:
         qconv2d: The quantized conv2d block object.
@@ -150,11 +147,6 @@ def get_quant_params_qconv2d(qconv2d: QConv2d):
         QuantParams: An object with fields .scale, .zero_point, and .dtype
     """
     if not isinstance(qconv2d, QConv2d):
-        return QuantParams(scale=None, zero_point=None, dtype= None)
+        return QuantParams(scale=None, zero_point=None, dtype=None)
 
-    return QuantParams(
-        scale=qconv2d.scale,
-        zero_point=qconv2d.zero_point,
-        dtype= torch.quint8
-    )
-
+    return QuantParams(scale=qconv2d.scale, zero_point=qconv2d.zero_point, dtype=torch.quint8)
