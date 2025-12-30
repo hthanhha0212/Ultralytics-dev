@@ -24,7 +24,7 @@ from ultralytics.utils import (
     callbacks,
     checks,
 )
-
+from torch.ao.quantization import QuantStub, DeQuantStub
 
 class Model(torch.nn.Module):
     """
@@ -307,6 +307,11 @@ class Model(torch.nn.Module):
             self.model.q = q
             self.model.do_qat = do_qat
             self.model.do_compare = do_compare
+            if self.q or self.do_qat:
+                self.quant = QuantStub() 
+                self.dequant = DeQuantStub()
+                self.model.quant = QuantStub()
+                self.model.dequant = DeQuantStub()
             self.task = self.model.task
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
             self.ckpt_path = self.model.pt_path
