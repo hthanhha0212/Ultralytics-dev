@@ -1,4 +1,4 @@
-path: /kaggle/input/AOLP # change if need
+path: /kaggle/input/yoloAOLP/AOLP # change if need
 
 train: images/train
 val: images/val
