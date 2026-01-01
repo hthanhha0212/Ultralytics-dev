@@ -1,0 +1,7 @@
+path: /kaggle/input/AOLP # change if need
+
+train: images/train
+val: images/val
+
+names:
+    0: license 
