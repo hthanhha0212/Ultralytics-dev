@@ -1,0 +1,8 @@
+path: /kaggle/input/upfralpr/UPFRALPR # change if need
+
+train: images/train
+val: images/val
+
+names:
+    0: vehicle 
+    1: license 
