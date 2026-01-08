@@ -1,0 +1,7 @@
+path: /kaggle/input/ufpralprv2/UPFRALPR_v2 # change if need
+
+train: images/train
+val: images/val
+
+names:
+    0: license 
