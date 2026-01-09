@@ -417,7 +417,7 @@ def prune(args):
 
     # use coco128 dataset for 10 epochs fine-tuning each pruning iteration step
     # this part is only for sample code, number of epochs should be included in config file
-    pruning_cfg['data'] = "data_config.yaml"
+    pruning_cfg['data'] = args.dataset
     pruning_cfg['epochs'] = 10 
 
     model.model.train()
@@ -577,6 +577,8 @@ if __name__ == "__main__":
     parser.add_argument('--cfg', default='default.yaml',
                         help='Pruning config file.'
                              ' This file should have same format with ultralytics/yolo/cfg/default.yaml')
+    parser.add_argument('--dataset', default='data_config.yaml',
+                        help='Dataset config YAML passed to pruning_cfg["data"].')
     parser.add_argument('--iterative-steps', default=16, type=int, help='Total pruning iteration step')
     parser.add_argument('--target-prune-rate', default=0.6, type=float, help='Target pruning rate')
     parser.add_argument('--max-map-drop', default=0.2, type=float, help='Allowed maximum map drop after fine-tuning')
