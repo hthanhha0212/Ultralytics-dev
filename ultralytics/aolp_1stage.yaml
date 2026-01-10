@@ -1,0 +1,9 @@
+path: /kaggle/input/aolpv1onestage/AOLP_v1 # change if need
+
+train: images/training
+val: images/validation
+test: images/testing
+
+names:
+    0: vehicle 
+    1: license
