@@ -1,8 +1,8 @@
-path: /kaggle/input/upfronestage/UPFRALPR_v2/vehicle_stage # change if need
+path: /kaggle/input/upfronestage/UFPR_v1 # change if need
 
-train: images/train
-val: images/val
-test: images/test
+train: images/training
+val: images/validation
+test: images/testing
 
 names:
     0: vehicle 
