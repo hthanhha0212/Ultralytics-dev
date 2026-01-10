@@ -4,4 +4,4 @@ train: images/training
 val: images/validation
 
 names:
-    0: license 
+    0: vehicle 
