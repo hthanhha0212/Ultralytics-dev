@@ -2,6 +2,7 @@ path: /kaggle/input/upfralpr2stage/UPFRALPR_v2/license_stage # change if need
 
 train: images/train
 val: images/val
+test: images/test
 
 names:
     0: license 

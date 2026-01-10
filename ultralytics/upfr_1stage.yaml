@@ -1,0 +1,9 @@
+path: /kaggle/input/upfronestage/UPFRALPR_v2/vehicle_stage # change if need
+
+train: images/train
+val: images/val
+test: images/test
+
+names:
+    0: vehicle 
+    1: license
