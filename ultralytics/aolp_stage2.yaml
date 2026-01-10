@@ -1,0 +1,7 @@
+path: /kaggle/input/aolp2stage/AOLP_v2/license_stage # change if need
+
+train: images/training
+val: images/validation
+
+names:
+    1: license 
