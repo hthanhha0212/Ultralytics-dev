@@ -1,4 +1,4 @@
-path: /kaggle/input/upfronestage/UFPR_v1 # change if need
+path: /kaggle/input/upfronestagev3/UFPR_v3 # change if need
 
 train: images/training
 val: images/validation
