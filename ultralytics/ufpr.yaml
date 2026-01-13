@@ -1,8 +1,7 @@
 path: /kaggle/input/upfralpr/UPFRALPR # change if need
 
-train: images/training
-val: images/validation
-test: images/testing
+train: images/train
+val: images/val
 
 names:
     0: vehicle 
