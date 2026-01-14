@@ -1,0 +1,9 @@
+path: /kaggle/input/ufprversion4/UFPR_v4 # change if need
+
+train: images/training
+val: images/validation
+
+names:
+    0: motorbike
+    1: car 
+    2: license
