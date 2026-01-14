@@ -1,8 +1,7 @@
-path: /kaggle/input/ufpronestagev3/UFPR_v3 # change if need
+path: /kaggle/input/ufpronestagev3/content/UFPR_v3 # change if need
 
 train: images/training
 val: images/validation
-test: images/testing
 
 names:
     0: motorbike
