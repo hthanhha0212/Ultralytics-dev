@@ -1,7 +1,7 @@
 task: detect
 mode: train
 model: yolov10n.yaml
-data: upfr_1stage.yaml
+data: ufpr_stage1.yaml
 epochs: 1000
 time: null
 patience: 1000
