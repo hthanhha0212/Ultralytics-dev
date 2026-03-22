@@ -12,6 +12,7 @@ class ResultNode:
     def __init__(self, name="", output=None):
         self._name = name
         self._output = output
+        self._input = None # Added to hold input
         self._children = OrderedDict()
 
     def __getattr__(self, name):
@@ -22,6 +23,10 @@ class ResultNode:
     def __call__(self):
         """Returns the tensor output for this node."""
         return self._output
+    
+    def input(self):
+        """Returns the tensor input for this node."""
+        return self._input
 
     def __repr__(self, indent=0):
         shape = self._output.shape if isinstance(self._output, torch.Tensor) else 'None'
@@ -65,7 +70,18 @@ class ResultsCollector:
     def _multi_hook(self, m, input, output):
         """Hook that handles multiple calls to the same module instance."""
         if hasattr(m, '_rc_call_count') and m._rc_call_count < len(m._rc_node_list):
-            # Clone output to avoid inplace modification issues
+            # 1. Capture Input
+            if isinstance(input, (list, tuple)) and len(input) > 0:
+                in_data = input[0] # Usually first arg
+            else:
+                in_data = input
+            
+            if isinstance(in_data, torch.Tensor):
+                captured_input = in_data.clone()
+            else:
+                captured_input = in_data
+
+            # 2. Capture Output
             if isinstance(output, torch.Tensor):
                 captured_output = output.clone()
             elif isinstance(output, (list, tuple)):
@@ -73,25 +89,26 @@ class ResultsCollector:
             else:
                 captured_output = output
 
-            # Update the specific node in the tree that corresponds to this call count
-            m._rc_node_list[m._rc_call_count]._output = captured_output
+            # Update the specific node
+            node = m._rc_node_list[m._rc_call_count]
+            node._output = captured_output
+            node._input = captured_input
             m._rc_call_count += 1
 
     def _register_recursive(self, module, node):
         """Recursively registers hooks and builds the ResultNode tree."""
-        # 1. Ensure the module has a hook and tracking list
+        # 1. Ensure the module has a tracking list
         if not hasattr(module, '_rc_node_list'):
             module._rc_node_list = []
-            module._rc_call_count = 0
+            # We only register the hook ONCE per module instance
             self.hooks.append(module.register_forward_hook(self._multi_hook))
             self._hooked_modules.append(module)
 
-        # 2. Add THIS specific node to the list of nodes this module should populate
+        # 2. Add THIS specific node to the list of nodes this module should populate.
+        # If a module is shared, it will have multiple nodes in its list.
         module._rc_node_list.append(node)
 
         # 3. Recursively handle children
-        # IMPORTANT: Even if this MODULE is shared, its children might be called 
-        # as part of this module's forward. So we MUST build the sub-tree for this node.
         for child_name, child in module.named_children():
             child_node = ResultNode(name=child_name)
             node._children[child_name] = child_node
