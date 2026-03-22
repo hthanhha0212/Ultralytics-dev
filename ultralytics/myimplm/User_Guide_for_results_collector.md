@@ -21,7 +21,7 @@ from ultralytics.myimplm import collect_results
 
 # 1. Initialize the quantized model
 base_weights = 'qyolov10n.yaml'
-quant_state_dict = 'path/to/your/qat_sttd.pt'
+quant_state_dict = '/content/Ultralytics-dev/ultralytics/quant/quant_state_dict/alpr_ptq_state_dict.pt'
 
 model = load_ptq_model_from_state_dict(
     base_weights = base_weights,
