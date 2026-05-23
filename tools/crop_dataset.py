@@ -3,14 +3,11 @@ from pathlib import Path
 
 from PIL import Image
 
-
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Crop YOLO-format boxes for a class id into a new dataset."
-    )
+    parser = argparse.ArgumentParser(description="Crop YOLO-format boxes for a class id into a new dataset.")
     parser.add_argument("--images", required=True, help="Path to image folder.")
     parser.add_argument("--labels", required=True, help="Path to label folder.")
     parser.add_argument("--class-id", type=int, required=True, help="Class id to crop.")
@@ -75,8 +72,8 @@ def letterbox(
         return Image.new("RGB", (target_w, target_h), pad_color), 1.0, 0, 0
 
     scale = min(target_w / src_w, target_h / src_h)
-    new_w = max(1, int(round(src_w * scale)))
-    new_h = max(1, int(round(src_h * scale)))
+    new_w = max(1, round(src_w * scale))
+    new_h = max(1, round(src_h * scale))
     resized = image.resize((new_w, new_h), Image.BILINEAR)
 
     canvas = Image.new("RGB", (target_w, target_h), pad_color)
@@ -212,12 +209,8 @@ def main() -> int:
                     ly2 = clamp(ly2, 0, target_size[1])
                     if lx2 <= lx1 or ly2 <= ly1:
                         continue
-                    nxc, nyc, nbw, nbh = xyxy_to_yolo(
-                        lx1, ly1, lx2, ly2, target_size[0], target_size[1]
-                    )
-                    label_handle.write(
-                        f"{class_id_output} {nxc:.6f} {nyc:.6f} {nbw:.6f} {nbh:.6f}\n"
-                    )
+                    nxc, nyc, nbw, nbh = xyxy_to_yolo(lx1, ly1, lx2, ly2, target_size[0], target_size[1])
+                    label_handle.write(f"{class_id_output} {nxc:.6f} {nyc:.6f} {nbw:.6f} {nbh:.6f}\n")
 
     return 0
 
