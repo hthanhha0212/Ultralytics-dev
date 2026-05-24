@@ -2611,7 +2611,7 @@ class NPUFlatC2f(nn.Module):
         # cv1 fan-out: standard Conv, uses both PE clusters
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         # cv2 fan-in: reads (2+n)*c channels, uses both PE clusters
-        self.cv2 = Conv((2 + n) * self.c, c2, 1)
+        self.cv2 = Conv(int((2 + n) * self.c), c2, 1)
         # NPUFlatBottleneck: no DWConv, no FloatFunctional
         self.m = nn.ModuleList(
             NPUFlatBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0)
