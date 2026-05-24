@@ -2612,9 +2612,8 @@ class NPUFlatC2f(nn.Module):
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         # cv2 fan-in: reads (2+n)*c channels, uses both PE clusters
         self.cv2 = Conv(int((2 + n) * self.c), c2, 1)
-        # NPUFlatBottleneck: no DWConv, no FloatFunctional
         self.m = nn.ModuleList(
-            NPUFlatBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0)
+            NPUFlatBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=0.5)
             for _ in range(n)
         )
 
@@ -2707,7 +2706,7 @@ class NPUC2fCIB(NPUFlatC2f):
         super().__init__(c1, c2, n, shortcut, g, e)
         # Override: replace NPUFlatBottleneck with NPUSimpleCIB
         self.m = nn.ModuleList(
-            NPUSimpleCIB(self.c, self.c, shortcut, e=1.0)
+            NPUSimpleCIB(self.c, self.c, shortcut, e=0.5)
             for _ in range(n)
         )
 
