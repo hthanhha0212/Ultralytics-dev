@@ -2663,7 +2663,7 @@ class NPUSimpleCIB(nn.Module):
             e (float): Expansion ratio for hidden channels.
         """
         super().__init__()
-        c_ = int(max(c1, c2) * e * 2)  # hidden channels (mimic CIB expansion)
+        c_ = int(c2 * e)  # hidden channels (match standard bottleneck size)
         # Inverted bottleneck: expand → 3×3 spatial → contract
         # All standard Conv (groups=1) — both PE clusters active
         self.cv1 = Conv(c1, c_, 1)       # expand
