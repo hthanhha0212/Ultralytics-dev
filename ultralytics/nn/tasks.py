@@ -1862,6 +1862,8 @@ def parse_model(d, ch, verbose=True, q=False):
               FCM_3,
               Pzconv,
               Down,
+              NPUFlatC2f,
+              NPUC2fCIB,
           }
       )
     quantize_modules = frozenset(
@@ -1896,6 +1898,8 @@ def parse_model(d, ch, verbose=True, q=False):
             QC2fCIB,
             C2PSA,
             A2C2f,
+            NPUFlatC2f,
+            NPUC2fCIB,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
