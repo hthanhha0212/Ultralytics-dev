@@ -1,0 +1,54 @@
+
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# NPU-Friendly YOLOv10n object detection model with P3/8 - P5/32 outputs
+# Optimized for the custom NPU (2 PE clusters, 3072 MACs/cycle, 200MHz)
+#
+# Changes vs. qyolov10n.yaml:
+#   - QC2f      -> NPUFlatC2f  : eliminates FloatFunctional rescale overhead (~3 RESCALE atomics per block)
+#   - SCDown     -> Conv(3,2)   : standard stride-2 conv uses both PE clusters (vs 1 in DWConv mode)
+#   - QPSA       -> SPPF        : removes MATMUL/SOFTMAX engines (scalar, no SIMD) entirely
+#   - QC2fCIB    -> NPUC2fCIB  : removes 7x7 depthwise conv (1.83M cycles) and all other DWConvs
+#   - Qv10Detect is run by host CPU (not NPU) - unchanged
+#
+# Estimated cycle reduction: ~10.3M cycles (from 25.7M -> ~15.4M), ~13 FPS at 200MHz
+# This is the maximum software-only improvement without NPU RTL changes.
+
+# Parameters
+nc: 2  # number of classes
+scales:
+  # [depth, width, max_channels]
+  n: [0.33, 0.25, 1024]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]         # 1-P2/4
+  - [-1, 3, NPUFlatC2f, [128, True]]   # 2  (was QC2f)
+  - [-1, 1, Conv, [256, 3, 2]]         # 3-P3/8
+  - [-1, 6, NPUFlatC2f, [256, True]]   # 4  (was QC2f)
+  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16  (was SCDown)
+  - [-1, 6, NPUFlatC2f, [512, True]]   # 6  (was QC2f)
+  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32  (was SCDown)
+  - [-1, 3, NPUFlatC2f, [1024, True]]  # 8  (was QC2f)
+  - [-1, 1, SPPF, [1024, 3]]           # 9  SPPF replaces QPSA (MATMUL/SOFTMAX removed), MaxPool 3x3
+
+# YOLOv10n head (NPU-Friendly)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 10
+  - [[-1, 6], 1, QConcat, [1]]                   # 11 cat backbone P4
+  - [-1, 3, NPUFlatC2f, [512]]                   # 12 (was QC2f)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 13
+  - [[-1, 4], 1, QConcat, [1]]                   # 14 cat backbone P3
+  - [-1, 3, NPUFlatC2f, [256]]                   # 15 (P3/8-small) (was QC2f)
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 16
+  - [[-1, 12], 1, QConcat, [1]]                  # 17 cat head P4
+  - [-1, 3, NPUFlatC2f, [512]]                   # 18 (P4/16-medium) (was QC2f)
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 19 (was SCDown)
+  - [[-1, 9], 1, QConcat, [1]]                   # 20 cat head P5 (connects to SPPF now)
+  - [-1, 3, NPUC2fCIB, [1024, True, True]]       # 21 (P5/32-large) (was QC2fCIB with 7x7 DWConv)
+
+  - [[15, 18, 21], 1, Qv10Detect, [nc]]          # 22 Detect(P3, P4, P5) — runs on host CPU

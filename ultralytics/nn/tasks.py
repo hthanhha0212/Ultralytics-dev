@@ -85,6 +85,11 @@ from ultralytics.nn.modules import (
     YOLOESegment,
     v10Detect,
     Qv10Detect,
+    # NPU-Friendly blocks
+    NPUFlatBottleneck,
+    NPUFlatC2f,
+    NPUSimpleCIB,
+    NPUC2fCIB,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml

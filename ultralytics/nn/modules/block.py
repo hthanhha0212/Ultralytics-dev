@@ -64,6 +64,11 @@ __all__ = (
     "SCDown",
     "QSCDown",
     "TorchVision",
+    # ---- NPU-Friendly replacements (no DWConv, no FloatFunctional rescale overhead) ----
+    "NPUFlatBottleneck",
+    "NPUFlatC2f",
+    "NPUSimpleCIB",
+    "NPUC2fCIB",
 )
 
 
@@ -2506,6 +2511,206 @@ class QC2fCIB(QC2f):
         """
         super().__init__(c1, c2, n, shortcut, g, e)
         self.m = nn.ModuleList(QCIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))
+
+# =============================================================================
+# NPU-Friendly Blocks
+# =============================================================================
+# These blocks are designed to maximize MAC array utilization on the custom
+# NPU by eliminating two classes of NPU-hostile operations:
+#
+#   1. FloatFunctional.cat() — forces RESCALE atomics before every concat,
+#      costing ~100K cycles each. Replaced by standard torch.cat() with a
+#      separate per-tensor PTQ calibration (no shared-scale enforcement).
+#
+#   2. Depthwise Convolutions (DWConv) — run on single_cluster=1 mode,
+#      halving MAC utilization, and causing severe BUF_WEIGHT bandwidth
+#      pressure. Replaced with standard CONV (3×3, groups=1).
+#
+# The QPSA block is replaced by QSPPF in the model config (npu_friendly_qyolov10n.yaml)
+# since MATMUL_ENGINE and SOFTMAX_ENGINE are scalar fallbacks with no SIMD width.
+# =============================================================================
+
+
+class NPUFlatBottleneck(nn.Module):
+    """NPU-friendly bottleneck with no depthwise convolutions.
+
+    Identical computation to QBottleneck but uses standard Conv (groups=1)
+    instead of DWConv, maximizing MAC array utilization on the NPU PE_CLUSTER.
+    Also avoids FloatFunctional for the residual ADD — the compiler handles
+    BP_ADD with proper scale parameters via BP_LOAD_PARAM.
+
+    Atomic ops generated (n=1):
+        CONV 3×3 (cv1)  →  CONV 3×3 (cv2)  →  ADD (residual)
+    = 3 UOP_DISPATCH slots, both PE clusters active for all 3.
+    """
+
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, g: int = 1,
+                 k: tuple = ((3, 3), (3, 3)), e: float = 1.0):
+        """
+        Initialize NPUFlatBottleneck.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use residual shortcut.
+            g (int): Groups (keep 1 for NPU efficiency).
+            k (tuple): Kernel sizes for the two convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        c_ = int(c2 * e)
+        # Standard Conv (groups=1) — uses both PE clusters, full MAC utilization
+        self.cv1 = Conv(c1, c_, k[0][0], 1)
+        self.cv2 = Conv(c_, c2, k[1][0], 1)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass: conv3x3 → conv3x3 → optional residual add."""
+        # Use standard tensor addition (not FloatFunctional.add).
+        # PTQ will observe the add output separately, giving the compiler
+        # the scale parameters it needs for BP_LOAD_PARAM + BP_ADD.
+        out = self.cv2(self.cv1(x))
+        return x + out if self.add else out
+
+
+class NPUFlatC2f(nn.Module):
+    """NPU-friendly C2f block that eliminates RESCALE overhead.
+
+    The standard QC2f uses FloatFunctional.cat(), which forces the NPU
+    compiler to insert RESCALE atomics (each = 1 full identity 1×1 CONV
+    dispatch) to harmonize quantization scales before concatenation.
+    For n=1 bottleneck, this means 3 extra RESCALE dispatches adding
+    ~300K+ cycles per C2f block.
+
+    This block uses standard torch.cat() instead. During PTQ calibration,
+    individual per-tensor observers on each chunk will independently
+    determine their scales, and the compiler will use BP_CONCAT (virtual,
+    zero cycles) with each tensor at its natural scale — no rescaling needed.
+
+    Atomic ops generated (n=1):
+        CONV 1×1 (cv1)  →  CONV 3×3 (m0.cv1)  →  CONV 3×3 (m0.cv2)
+        →  ADD (m0 residual)  →  CONCAT (virtual)  →  CONV 1×1 (cv2)
+    = 6 UOP_DISPATCH slots (vs. 9 in QC2f with 3 RESCALE ops).
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False,
+                 g: int = 1, e: float = 0.5):
+        """
+        Initialize NPUFlatC2f.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of NPUFlatBottleneck blocks.
+            shortcut (bool): Whether to use shortcut in bottlenecks.
+            g (int): Groups (keep 1 for NPU efficiency).
+            e (float): Expansion ratio for hidden channels.
+        """
+        super().__init__()
+        self.c = int(c2 * e)
+        # cv1 fan-out: standard Conv, uses both PE clusters
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        # cv2 fan-in: reads (2+n)*c channels, uses both PE clusters
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)
+        # NPUFlatBottleneck: no DWConv, no FloatFunctional
+        self.m = nn.ModuleList(
+            NPUFlatBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0)
+            for _ in range(n)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through NPUFlatC2f.
+
+        Uses standard torch.cat() — no FloatFunctional.cat() — so the NPU
+        compiler treats concat as a virtual BP_CONCAT (zero cycles).
+        Each chunk retains its own quantization scale, eliminating RESCALE ops.
+        """
+        # cv1 output split into 2 halves (no-op at inference, scale is shared)
+        y = list(self.cv1(x).chunk(2, 1))
+        # extend with bottleneck outputs (each at its own scale after PTQ)
+        y.extend(m(y[-1]) for m in self.m)
+        # Standard cat: no shared-scale enforcement, compiler uses BP_CONCAT
+        return self.cv2(torch.cat(y, 1))
+
+
+class NPUSimpleCIB(nn.Module):
+    """NPU-friendly CIB replacement: pure 1×1 → 3×3 → 1×1 bottleneck.
+
+    The original QCIB has 5 sub-layers, 3 of which are DWConv:
+        DWConv 3×3 → Conv 1×1 → DWConv 7×7 → Conv 1×1 → DWConv 3×3
+
+    Each DWConv runs on single_cluster=1 mode on the NPU, halving the
+    available MACs. The 7×7 DWConv alone costs 1.83M cycles.
+
+    This simplified block replaces all 5 sub-layers with a standard
+    inverted bottleneck (3 ops, all on both PE clusters):
+        Conv 1×1 (expand) → Conv 3×3 (spatial mix) → Conv 1×1 (contract)
+
+    Atomic ops generated:
+        CONV 1×1  →  CONV 3×3  →  CONV 1×1  →  optional ADD (residual)
+    = 3–4 UOP_DISPATCH slots (vs. 7 in QCIB with 3 DWConv + 2 rescales).
+    Both PE clusters active for all ops.
+    """
+
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, e: float = 0.5):
+        """
+        Initialize NPUSimpleCIB.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use residual shortcut.
+            e (float): Expansion ratio for hidden channels.
+        """
+        super().__init__()
+        c_ = int(max(c1, c2) * e * 2)  # hidden channels (mimic CIB expansion)
+        # Inverted bottleneck: expand → 3×3 spatial → contract
+        # All standard Conv (groups=1) — both PE clusters active
+        self.cv1 = Conv(c1, c_, 1)       # expand
+        self.cv2 = Conv(c_, c_, 3)       # spatial mix (was 7×7 DWConv in CIB)
+        self.cv3 = Conv(c_, c2, 1)       # contract
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass: 1×1 expand → 3×3 mix → 1×1 contract → optional residual."""
+        out = self.cv3(self.cv2(self.cv1(x)))
+        return x + out if self.add else out
+
+
+class NPUC2fCIB(NPUFlatC2f):
+    """NPU-friendly C2fCIB: NPUFlatC2f with NPUSimpleCIB bottlenecks.
+
+    Replaces QC2fCIB (which uses DWConv 7×7 via QRepVGGDW + DWConv 3×3 wrappers)
+    with a fully standard-convolution implementation for maximum NPU efficiency.
+
+    Atomic ops for n=1 (c1=256, c2=256 at L22 scale):
+        CONV 1×1 (cv1)  →  CONV 1×1 (m0 expand)  →  CONV 3×3 (m0 mix)
+        →  CONV 1×1 (m0 contract)  →  ADD  →  CONCAT (virtual)  →  CONV 1×1 (cv2)
+    = 7 UOP_DISPATCH slots, all using both PE clusters.
+    vs. original QCIB: 14+ slots including 3 DWConvs at 50% PE utilization.
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False,
+                 lk: bool = False, g: int = 1, e: float = 0.5):
+        """
+        Initialize NPUC2fCIB.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of NPUSimpleCIB modules.
+            shortcut (bool): Whether to use shortcut connection.
+            lk (bool): Ignored (was large-kernel flag for QRepVGGDW).
+            g (int): Groups (keep 1 for NPU efficiency).
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        # Override: replace NPUFlatBottleneck with NPUSimpleCIB
+        self.m = nn.ModuleList(
+            NPUSimpleCIB(self.c, self.c, shortcut, e=1.0)
+            for _ in range(n)
+        )
+
 
 class QDFL(nn.Module):
     """

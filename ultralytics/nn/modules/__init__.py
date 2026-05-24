@@ -69,6 +69,11 @@ from .block import (
     SCDown,
     QSCDown,
     TorchVision,
+    # NPU-Friendly blocks
+    NPUFlatBottleneck,
+    NPUFlatC2f,
+    NPUSimpleCIB,
+    NPUC2fCIB,
 )
 from .conv import (
     CBAM,
@@ -215,4 +220,9 @@ __all__ = (
     "FCM_1",
     "Pzconv",
     "Down",
+    # NPU-Friendly blocks
+    "NPUFlatBottleneck",
+    "NPUFlatC2f",
+    "NPUSimpleCIB",
+    "NPUC2fCIB",
 )
