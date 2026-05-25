@@ -87,6 +87,9 @@ from ultralytics.nn.modules import (
     Qv10Detect,
     # NPU-Friendly blocks
     NPUFlatBottleneck,
+    NPUBottleneck,
+    NPUC3,
+    NPUSPPF,
     NPUFlatC2f,
     NPUSimpleCIB,
     NPUC2fCIB,
@@ -1862,6 +1865,9 @@ def parse_model(d, ch, verbose=True, q=False):
               FCM_3,
               Pzconv,
               Down,
+              NPUBottleneck,
+              NPUC3,
+              NPUSPPF,
               NPUFlatC2f,
               NPUC2fCIB,
           }
@@ -1898,6 +1904,8 @@ def parse_model(d, ch, verbose=True, q=False):
             QC2fCIB,
             C2PSA,
             A2C2f,
+            NPUBottleneck,
+            NPUC3,
             NPUFlatC2f,
             NPUC2fCIB,
         }

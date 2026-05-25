@@ -2531,6 +2531,52 @@ class QC2fCIB(QC2f):
 # =============================================================================
 
 
+class NPUBottleneck(nn.Module):
+    """NPU-friendly Bottleneck with NO add operation (pure sequential)."""
+    def __init__(self, c1, c2, shortcut=False, g=1, k=(1, 3), e=0.5):
+        """Initializes a standard bottleneck but strictly removes the residual addition."""
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+
+    def forward(self, x):
+        """Forward pass through NPU bottleneck (no add)."""
+        return self.cv2(self.cv1(x))
+
+
+class NPUC3(nn.Module):
+    """NPU-friendly C3 with NO torch.cat operation (pure sequential)."""
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        """Initializes NPUC3 module without split/merge."""
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.m = nn.Sequential(*(NPUBottleneck(c_, c_, shortcut=False, g=g, e=1.0) for _ in range(n)))
+        self.cv2 = Conv(c_, c2, 1, 1)
+
+    def forward(self, x):
+        """Forward pass through purely sequential convolutions (no cat)."""
+        return self.cv2(self.m(self.cv1(x)))
+
+
+class NPUSPPF(nn.Module):
+    """NPU-friendly SPPF with NO maxpool and NO concat (pure sequential)."""
+    def __init__(self, c1, c2, k=5):
+        """Initializes NPUSPPF using 3x3 convolutions instead of max pools."""
+        super().__init__()
+        c_ = c1 // 2
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.m1 = Conv(c_, c_, 3, 1)
+        self.m2 = Conv(c_, c_, 3, 1)
+        self.m3 = Conv(c_, c_, 3, 1)
+        self.cv2 = Conv(c_, c2, 1, 1)
+
+    def forward(self, x):
+        """Forward pass mapping sequential convolutions instead of pools and concats."""
+        return self.cv2(self.m3(self.m2(self.m1(self.cv1(x)))))
+
+
 class NPUFlatBottleneck(nn.Module):
     """NPU-friendly bottleneck with no depthwise convolutions.
 

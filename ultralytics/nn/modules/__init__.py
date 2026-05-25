@@ -71,6 +71,9 @@ from .block import (
     TorchVision,
     # NPU-Friendly blocks
     NPUFlatBottleneck,
+    NPUBottleneck,
+    NPUC3,
+    NPUSPPF,
     NPUFlatC2f,
     NPUSimpleCIB,
     NPUC2fCIB,
@@ -222,6 +225,9 @@ __all__ = (
     "Down",
     # NPU-Friendly blocks
     "NPUFlatBottleneck",
+    "NPUBottleneck",
+    "NPUC3",
+    "NPUSPPF",
     "NPUFlatC2f",
     "NPUSimpleCIB",
     "NPUC2fCIB",
