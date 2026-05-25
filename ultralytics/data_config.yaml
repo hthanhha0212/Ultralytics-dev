@@ -1,4 +1,4 @@
-path: /kaggle/input/alprdatasetv3/dataset_merged # change if need
+path: /content/processdata # change if need
 
 train: images/train
 val: images/val
