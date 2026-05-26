@@ -1330,6 +1330,7 @@ class QDetect(nn.Module):
 
         for i in range(self.nl):
             x[i] = self.fl.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+        x = [self.dequant(item) for item in x]
         if self.training:  # Training path
             return x
         y = self._inference(x)
