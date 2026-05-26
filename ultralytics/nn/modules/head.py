@@ -1325,6 +1325,9 @@ class QDetect(nn.Module):
 
     def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor] | tuple:
         """Concatenate and return predicted bounding boxes and class probabilities."""
+        # Ensure incoming tensors are float32 before processing with unquantized cv2/cv3 layers
+        x = [xi.dequantize() if xi.is_quantized else xi for xi in x]
+        
         if self.end2end:
             return self.forward_end2end(x)
 
@@ -1347,6 +1350,9 @@ class QDetect(nn.Module):
             outputs (dict | tuple): Training mode returns dict with one2many and one2one outputs.
                 Inference mode returns processed detections or tuple with detections and raw outputs.
         """
+        # Ensure incoming tensors are float32 before processing
+        x = [xi.dequantize() if getattr(xi, 'is_quantized', False) else xi for xi in x]
+        
         x_detach = [xi.detach() for xi in x]
 
         one2one = [
