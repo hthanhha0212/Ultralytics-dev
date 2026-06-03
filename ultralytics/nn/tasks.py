@@ -93,6 +93,7 @@ from ultralytics.nn.modules import (
     NPUFlatC2f,
     NPUSimpleCIB,
     NPUC2fCIB,
+    NPUAddC3,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1870,6 +1871,7 @@ def parse_model(d, ch, verbose=True, q=False):
               NPUSPPF,
               NPUFlatC2f,
               NPUC2fCIB,
+              NPUAddC3,
           }
       )
     quantize_modules = frozenset(
@@ -1908,6 +1910,7 @@ def parse_model(d, ch, verbose=True, q=False):
             NPUC3,
             NPUFlatC2f,
             NPUC2fCIB,
+            NPUAddC3,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -1959,6 +1962,14 @@ def parse_model(d, ch, verbose=True, q=False):
             args = [ch[f]]
         elif m is Concat or m is QConcat:
             c2 = sum(ch[x] for x in f)
+        elif m is NPUAddC3:
+            c1 = [ch[x] for x in f]
+            c2 = args[0]
+            if c2 != nc:
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, c2, *args[1:]]
+            args.insert(2, n)
+            n = 1
         elif m in frozenset(
             {Detect, QDetect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, Qv10Detect}
         ):

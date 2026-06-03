@@ -69,6 +69,7 @@ __all__ = (
     "NPUFlatC2f",
     "NPUSimpleCIB",
     "NPUC2fCIB",
+    "NPUAddC3",
 )
 
 
@@ -2558,6 +2559,25 @@ class NPUC3(nn.Module):
     def forward(self, x):
         """Forward pass through purely sequential convolutions (no cat)."""
         return self.cv2(self.m(self.cv1(x)))
+
+
+class NPUAddC3(nn.Module):
+    """NPU-friendly C3 that eliminates Concat by using Split-Conv-Add."""
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        """Initializes NPUAddC3 module."""
+        super().__init__()
+        c_ = int(c2 * e)
+        # c1 is a list of input channels from the multiple layers we are replacing
+        self.cv1_splits = nn.ModuleList([Conv(c_in, c_, 1, 1) for c_in in c1])
+        self.m = nn.Sequential(*(NPUBottleneck(c_, c_, shortcut=False, g=g, e=1.0) for _ in range(n)))
+        self.cv2 = Conv(c_, c2, 1, 1)
+
+    def forward(self, x):
+        """Forward pass applying separate convs and adding, completely skipping cat."""
+        out = self.cv1_splits[0](x[0])
+        for i in range(1, len(x)):
+            out = out + self.cv1_splits[i](x[i])
+        return self.cv2(self.m(out))
 
 
 class NPUSPPF(nn.Module):

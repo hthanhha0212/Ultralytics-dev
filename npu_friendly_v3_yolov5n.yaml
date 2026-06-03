@@ -1,0 +1,39 @@
+# NPU-Friendly YOLOv5 object detection model (No Concat)
+
+# Parameters
+nc: 80 # number of classes
+scales: 
+  # [depth, width, max_channels]
+  n: [0.33, 0.22, 960]
+
+# NPU-friendly YOLOv5 backbone
+backbone:
+  # [from, number, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 3, NPUC3, [128]] # 2
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 6, NPUC3, [256]] # 4
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 9, NPUC3, [512]] # 6
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 3, NPUC3, [1024]] # 8
+  - [-1, 1, NPUSPPF, [1024, 5]] # 9
+
+# NPU-friendly YOLOv5 head (Using NPUAddC3)
+head:
+  - [-1, 1, Conv, [512, 1, 1]] # 10
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 11
+  - [[-1, 6], 3, NPUAddC3, [512]] # 12 (replaces QConcat + NPUC3)
+
+  - [-1, 1, Conv, [256, 1, 1]] # 13
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 14
+  - [[-1, 4], 3, NPUAddC3, [256]] # 15 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]] # 16
+  - [[-1, 13], 3, NPUAddC3, [512]] # 17 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]] # 18
+  - [[-1, 10], 3, NPUAddC3, [1024]] # 19 (P5/32-large)
+
+  - [[15, 17, 19], 1, QDetect, [nc]] # 20 QDetect(P3, P4, P5)

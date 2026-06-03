@@ -77,6 +77,7 @@ from .block import (
     NPUFlatC2f,
     NPUSimpleCIB,
     NPUC2fCIB,
+    NPUAddC3,
 )
 from .conv import (
     CBAM,
@@ -231,4 +232,5 @@ __all__ = (
     "NPUFlatC2f",
     "NPUSimpleCIB",
     "NPUC2fCIB",
+    "NPUAddC3",
 )
