@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
-import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
 
 from PIL import Image
-
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
@@ -21,13 +21,13 @@ def iter_images(root: Path, recursive: bool) -> Iterable[Path]:
                 yield path
 
 
-def find_white_bbox(image_path: Path, threshold: int) -> Optional[Tuple[int, int, int, int]]:
+def find_white_bbox(image_path: Path, threshold: int) -> tuple[int, int, int, int] | None:
     img = Image.open(image_path).convert("L")
     bw = img.point(lambda p: 255 if p >= threshold else 0)
     return bw.getbbox()
 
 
-def bbox_to_yolo(bbox: Tuple[int, int, int, int], width: int, height: int) -> Tuple[float, float, float, float]:
+def bbox_to_yolo(bbox: tuple[int, int, int, int], width: int, height: int) -> tuple[float, float, float, float]:
     left, top, right, bottom = bbox
     x_center = (left + right) / 2.0 / width
     y_center = (top + bottom) / 2.0 / height
