@@ -1,25 +1,22 @@
 from __future__ import annotations
 
-from typing import Tuple
-
 import torch
 from torch.nn.modules.utils import _pair
 
 __all__ = ("has_insufficient_window",)
 
 
-def _get_padding(padding) -> Tuple[int, int]:
+def _get_padding(padding) -> tuple[int, int]:
     if isinstance(padding, str):
         raise ValueError("String padding modes are not supported for this check.")
     return _pair(padding)
 
 
 def has_insufficient_window(conv2d: torch.nn.Module, x: torch.Tensor) -> bool:
-    """
-    Return True if the convolution would drop a trailing partial window.
+    """Return True if the convolution would drop a trailing partial window.
 
-    This happens when the effective input size (including padding) does not align
-    with the stride, leaving a remainder smaller than the kernel.
+    This happens when the effective input size (including padding) does not align with the stride, leaving a remainder
+    smaller than the kernel.
     """
     if x.ndim != 4:
         raise ValueError("Input tensor must have shape (N, C, H, W).")

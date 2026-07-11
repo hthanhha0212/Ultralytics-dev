@@ -1,18 +1,20 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
-from collections import OrderedDict
 
 __all__ = "ResultNode", "ResultsCollector", "collect_results"
 
+
 class ResultNode:
+    """A node in the results tree that can hold a tensor and children nodes. Supports dot notation for child access and
+    __call__ for tensor access.
     """
-    A node in the results tree that can hold a tensor and children nodes.
-    Supports dot notation for child access and __call__ for tensor access.
-    """
+
     def __init__(self, name="", output=None):
         self._name = name
         self._output = output
-        self._input = None # Added to hold input
+        self._input = None  # Added to hold input
         self._children = OrderedDict()
 
     def __getattr__(self, name):
@@ -23,13 +25,13 @@ class ResultNode:
     def __call__(self):
         """Returns the tensor output for this node."""
         return self._output
-    
+
     def input(self):
         """Returns the tensor input for this node."""
         return self._input
 
     def __repr__(self, indent=0):
-        shape = self._output.shape if isinstance(self._output, torch.Tensor) else 'None'
+        shape = self._output.shape if isinstance(self._output, torch.Tensor) else "None"
         res = "  " * indent + f"{self._name}: {shape}\n"
         for child in self._children.values():
             res += child.__repr__(indent + 1)
@@ -57,11 +59,12 @@ class ResultNode:
             flat.update(child.to_dict(new_prefix))
         return flat
 
+
 class ResultsCollector:
+    """Collects intermediate results from a PyTorch model during inference. Handles shared modules (like Concat or
+    activations) correctly.
     """
-    Collects intermediate results from a PyTorch model during inference.
-    Handles shared modules (like Concat or activations) correctly.
-    """
+
     def __init__(self):
         self.hooks = []
         self.results = None
@@ -69,13 +72,13 @@ class ResultsCollector:
 
     def _multi_hook(self, m, input, output):
         """Hook that handles multiple calls to the same module instance."""
-        if hasattr(m, '_rc_call_count') and m._rc_call_count < len(m._rc_node_list):
+        if hasattr(m, "_rc_call_count") and m._rc_call_count < len(m._rc_node_list):
             # 1. Capture Input
             if isinstance(input, (list, tuple)) and len(input) > 0:
-                in_data = input[0] # Usually first arg
+                in_data = input[0]  # Usually first arg
             else:
                 in_data = input
-            
+
             if isinstance(in_data, torch.Tensor):
                 captured_input = in_data.clone()
             else:
@@ -98,7 +101,7 @@ class ResultsCollector:
     def _register_recursive(self, module, node):
         """Recursively registers hooks and builds the ResultNode tree."""
         # 1. Ensure the module has a tracking list
-        if not hasattr(module, '_rc_node_list'):
+        if not hasattr(module, "_rc_node_list"):
             module._rc_node_list = []
             # We only register the hook ONCE per module instance
             self.hooks.append(module.register_forward_hook(self._multi_hook))
@@ -115,17 +118,15 @@ class ResultsCollector:
             self._register_recursive(child, child_node)
 
     def __call__(self, model, input_tensor):
-        """
-        Performs inference and collects results.
-        """
+        """Performs inference and collects results."""
         self.hooks = []
         self._hooked_modules = []
         self.results = ResultNode(name="root")
 
-        target_model = model.model if hasattr(model, 'model') else model
+        target_model = model.model if hasattr(model, "model") else model
 
         # Handle Ultralytics model structure
-        if hasattr(target_model, 'model') and isinstance(target_model.model, (nn.Sequential, nn.ModuleList)):
+        if hasattr(target_model, "model") and isinstance(target_model.model, (nn.Sequential, nn.ModuleList)):
             for i, layer in enumerate(target_model.model):
                 layer_name = f"Layer{i}"
                 layer_node = ResultNode(name=layer_name)
@@ -150,10 +151,8 @@ class ResultsCollector:
 
         return self.results
 
+
 def collect_results(model, input_tensor):
-    """
-    Convenience function to collect all intermediate results from a model.
-    """
+    """Convenience function to collect all intermediate results from a model."""
     collector = ResultsCollector()
     return collector(model, input_tensor)
-
