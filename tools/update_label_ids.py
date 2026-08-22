@@ -75,11 +75,7 @@ def main() -> int:
         if changed:
             changed_files += 1
 
-    print(
-        f"Processed {total_files} files; "
-        f"updated {changed_files} files; "
-        f"changed {total_lines} lines."
-    )
+    print(f"Processed {total_files} files; updated {changed_files} files; changed {total_lines} lines.")
     return 0
 
 
