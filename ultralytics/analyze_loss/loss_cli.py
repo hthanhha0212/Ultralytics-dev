@@ -100,7 +100,9 @@ def compute_losses(
     cfg.task = "detect"
     cfg.data = data_cfg
     cfg.workers = workers
-    dataset = build_yolo_dataset(cfg, img_path=split_path, batch=batch, data=data_cfg, mode="val", rect=True, stride=stride)
+    dataset = build_yolo_dataset(
+        cfg, img_path=split_path, batch=batch, data=data_cfg, mode="val", rect=True, stride=stride
+    )
     dataloader = build_dataloader(dataset, batch=batch, workers=workers, shuffle=False, rank=-1, drop_last=False)
 
     iterator = TQDM(dataloader, total=len(dataset), desc="Loss", unit="img") if show_progress else dataloader
