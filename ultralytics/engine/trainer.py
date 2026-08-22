@@ -6,7 +6,8 @@ Usage:
     $ yolo mode=train model=yolo11n.pt data=coco8.yaml imgsz=640 epochs=100 batch=16
 """
 
-import dill
+from __future__ import annotations
+
 import gc
 import math
 import os
@@ -17,6 +18,7 @@ from copy import copy, deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import dill
 import numpy as np
 import torch
 from torch import distributed as dist
@@ -63,8 +65,7 @@ from ultralytics.utils.torch_utils import (
 
 
 class BaseTrainer:
-    """
-    A base class for creating trainers.
+    """A base class for creating trainers.
 
     This class provides the foundation for training YOLO models, handling the training loop, validation, checkpointing,
     and various training utilities. It supports both single-GPU and multi-GPU distributed training.
@@ -114,8 +115,7 @@ class BaseTrainer:
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
-        """
-        Initialize the BaseTrainer class.
+        """Initialize the BaseTrainer class.
 
         Args:
             cfg (str, optional): Path to a configuration file.
@@ -178,7 +178,7 @@ class BaseTrainer:
         # Callbacks
         self.callbacks = _callbacks or callbacks.get_default_callbacks()
 
-        # QAT 
+        # QAT
         self.do_qat_ema_update_first_time = True
 
         if isinstance(self.args.device, str) and len(self.args.device):  # i.e. device='0' or device='0,1,2,3'
@@ -232,8 +232,8 @@ class BaseTrainer:
             try:
                 LOGGER.info(f"{colorstr('DDP:')} debug command {' '.join(cmd)}")
                 subprocess.run(cmd, check=True)
-            except Exception as e:
-                raise e
+            except Exception:
+                raise
             finally:
                 ddp_cleanup(self, str(file))
 
@@ -552,7 +552,7 @@ class BaseTrainer:
                 total = torch.cuda.get_device_properties(self.device).total_memory
         return ((memory / total) if total > 0 else 0) if fraction else (memory / 2**30)
 
-    def _clear_memory(self, threshold: float = None):
+    def _clear_memory(self, threshold: float | None = None):
         """Clear accelerator memory by calling garbage collector and emptying cache."""
         if threshold:
             assert 0 <= threshold <= 1, "Threshold must be between 0 and 1."
@@ -595,7 +595,7 @@ class BaseTrainer:
                 "updates": self.ema.updates,
                 "optimizer": convert_optimizer_state_dict_to_fp16(deepcopy(self.optimizer.state_dict())),
                 "train_args": vars(self.args),  # save as dict
-                "train_metrics": {**self.metrics, **{"fitness": self.fitness}},
+                "train_metrics": {**self.metrics, "fitness": self.fitness},
                 "train_results": self.read_results_csv(),
                 "date": datetime.now().isoformat(),
                 "version": __version__,
@@ -634,7 +634,7 @@ class BaseTrainer:
                 "updates": self.ema.updates,
                 "optimizer": convert_optimizer_state_dict_to_fp16(deepcopy(self.optimizer.state_dict())),
                 "train_args": vars(self.args),  # save as dict
-                "train_metrics": {**self.metrics, **{"fitness": self.fitness}},
+                "train_metrics": {**self.metrics, "fitness": self.fitness},
                 "train_results": self.read_results_csv(),
                 "date": datetime.now().isoformat(),
                 "version": __version__,
@@ -647,7 +647,8 @@ class BaseTrainer:
                 "license": "AGPL-3.0 (https://ultralytics.com/license)",
                 "docs": "https://docs.ultralytics.com",
             },
-            buffer, pickle_module=dill,
+            buffer,
+            pickle_module=dill,
         )
         serialized_ckpt = buffer.getvalue()  # get the serialized content to save
         # Save checkpoints
@@ -658,8 +659,7 @@ class BaseTrainer:
             (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
 
     def get_dataset(self):
-        """
-        Get train and validation datasets from data dictionary.
+        """Get train and validation datasets from data dictionary.
 
         Returns:
             (dict): A dictionary containing the training/validation/test dataset and category names.
@@ -694,8 +694,7 @@ class BaseTrainer:
         return data
 
     def setup_model(self):
-        """
-        Load, create, or download model for any task.
+        """Load, create, or download model for any task.
 
         Returns:
             (dict): Optional checkpoint to resume training from.
@@ -733,8 +732,7 @@ class BaseTrainer:
         return batch
 
     def validate(self):
-        """
-        Run validation on val set using self.validator.
+        """Run validation on val set using self.validator.
 
         Returns:
             metrics (dict): Dictionary of validation metrics.
@@ -763,10 +761,9 @@ class BaseTrainer:
         raise NotImplementedError("build_dataset function not implemented in trainer")
 
     def label_loss_items(self, loss_items=None, prefix="train"):
-        """
-        Return a loss dict with labelled training loss items tensor.
+        """Return a loss dict with labeled training loss items tensor.
 
-        Note:
+        Notes:
             This is not needed for classification but necessary for segmentation & detection
         """
         return {"loss": loss_items} if loss_items is not None else ["loss"]
@@ -777,7 +774,6 @@ class BaseTrainer:
 
     def build_targets(self, preds, targets):
         """Build target tensors for training YOLO model."""
-        pass
 
     def progress_string(self):
         """Return a string describing training progress."""
@@ -786,20 +782,18 @@ class BaseTrainer:
     # TODO: may need to put these following functions into callback
     def plot_training_samples(self, batch, ni):
         """Plot training samples during YOLO training."""
-        pass
 
     def plot_training_labels(self):
         """Plot training labels for YOLO model."""
-        pass
 
     def save_metrics(self, metrics):
         """Save training metrics to a CSV file."""
         keys, vals = list(metrics.keys()), list(metrics.values())
         n = len(metrics) + 2  # number of cols
-        s = "" if self.csv.exists() else (("%s," * n % tuple(["epoch", "time"] + keys)).rstrip(",") + "\n")  # header
+        s = "" if self.csv.exists() else (("%s," * n % ("epoch", "time", *keys)).rstrip(",") + "\n")  # header
         t = time.time() - self.train_time_start
         with open(self.csv, "a", encoding="utf-8") as f:
-            f.write(s + ("%.6g," * n % tuple([self.epoch + 1, t] + vals)).rstrip(",") + "\n")
+            f.write(s + ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",") + "\n")
 
     def plot_metrics(self):
         """Plot metrics from a CSV file."""
@@ -912,18 +906,16 @@ class BaseTrainer:
             self.train_loader.dataset.close_mosaic(hyp=copy(self.args))
 
     def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5, iterations=1e5):
-        """
-        Construct an optimizer for the given model.
+        """Construct an optimizer for the given model.
 
         Args:
             model (torch.nn.Module): The model for which to build an optimizer.
-            name (str, optional): The name of the optimizer to use. If 'auto', the optimizer is selected
-                based on the number of iterations.
+            name (str, optional): The name of the optimizer to use. If 'auto', the optimizer is selected based on the
+                number of iterations.
             lr (float, optional): The learning rate for the optimizer.
             momentum (float, optional): The momentum factor for the optimizer.
             decay (float, optional): The weight decay for the optimizer.
-            iterations (float, optional): The number of iterations, which determines the optimizer if
-                name is 'auto'.
+            iterations (float, optional): The number of iterations, which determines the optimizer if name is 'auto'.
 
         Returns:
             (torch.optim.Optimizer): The constructed optimizer.

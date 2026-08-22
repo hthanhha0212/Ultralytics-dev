@@ -4,6 +4,6 @@ train: images/training
 val: images/validation
 
 names:
-    0: motorbike
-    1: car 
-    2: license
+  0: motorbike
+  1: car
+  2: license
