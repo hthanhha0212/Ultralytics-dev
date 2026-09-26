@@ -5,4 +5,4 @@ val: images/validation
 test: images/testing
 
 names:
-    0: vehicle 
+  0: vehicle
