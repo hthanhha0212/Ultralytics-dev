@@ -1,6 +1,5 @@
-import yaml
-import sys
 from ultralytics import YOLO
+
 
 def create_and_check():
     yaml_content = """
@@ -45,12 +44,13 @@ head:
 """
     with open("ultralytics/npu_test.yaml", "w") as f:
         f.write(yaml_content)
-        
+
     try:
         model = YOLO("ultralytics/npu_test.yaml")
         print(model.info())
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     create_and_check()
