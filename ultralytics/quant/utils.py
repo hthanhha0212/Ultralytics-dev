@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Union
 
 import torch
 
@@ -9,16 +8,15 @@ from ultralytics import YOLO
 
 
 def prepare_qat_model(
-    model_config: Union[str, Path],
-    weights: Optional[Union[str, Path]] = None,
+    model_config: str | Path,
+    weights: str | Path | None = None,
     *,
-    qconfig: Optional[torch.ao.quantization.QConfig] = None,
+    qconfig: torch.ao.quantization.QConfig | None = None,
     prepare_inplace: bool = True,
     show_info: bool = False,
 ) -> YOLO:
-    """
-    Build a YOLO model configured for Quantization Aware Training (QAT).
-    Note that only YOLOv10 model works for this setup.
+    """Build a YOLO model configured for Quantization Aware Training (QAT). Note that only YOLOv10 model works for this
+    setup.
 
     Args:
         model_config: Path to a YOLO model configuration file (e.g. ``qyolov10n.yaml``).
@@ -30,7 +28,6 @@ def prepare_qat_model(
     Returns:
         The configured YOLO model ready for QAT.
     """
-
     model = YOLO(str(model_config), do_qat=True)
 
     if weights:
@@ -74,30 +71,30 @@ def prepare_qat_model(
 
 
 def run_post_training_quantization(
-    weights: Union[str, Path],
-    data: Union[str, Path],
-       *,
+    weights: str | Path,
+    data: str | Path,
+    *,
     imgsz: int = 640,
     batch: int = 16,
     convert_inplace: bool = True,
     calibrate: bool = True,
     verbose: bool = True,
-    val_kwargs: Optional[Dict] = None,
-   ) -> YOLO:
-   
+    val_kwargs: dict | None = None,
+) -> YOLO:
+
     model = YOLO(str(weights), q=True)
     model.model.eval()
 
     model.model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
 
-    model.model.model[23].dfl.qconfig = None 
+    model.model.model[23].dfl.qconfig = None
 
     torch.ao.quantization.prepare(model.model, inplace=True)
 
     if calibrate:
         if verbose:
             print("Performing PTQ calibration...")
-        val_args: Dict = {"data": str(data), "imgsz": imgsz, "batch": batch}
+        val_args: dict = {"data": str(data), "imgsz": imgsz, "batch": batch}
         if val_kwargs:
             val_args.update(val_kwargs)
         model.val(**val_args)
@@ -111,11 +108,10 @@ def run_post_training_quantization(
 
 
 def load_ptq_model_from_state_dict(
-    base_weights: Union[str, Path],
-    quant_state_dict: Union[str, Path],
+    base_weights: str | Path,
+    quant_state_dict: str | Path,
 ) -> YOLO:
-    """
-    Rebuild a quantized YOLOv10 model shell and load pre-computed quantized weights.
+    """Rebuild a quantized YOLOv10 model shell and load pre-computed quantized weights.
 
     Args:
         base_weights: Path to the floating-point checkpoint used to instantiate the shell.
@@ -126,14 +122,13 @@ def load_ptq_model_from_state_dict(
     Returns:
         The restored quantized ``YOLO`` model instance.
     """
-
     model = YOLO(str(base_weights), q=True)
     model.model.eval()
 
     model.model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
 
     model.model.model[23].dfl.qconfig = None
-    
+
     torch.quantization.prepare(model.model, inplace=True)
 
     model.fuse()
@@ -146,12 +141,12 @@ def load_ptq_model_from_state_dict(
 
     return model
 
+
 def load_qat_model_from_state_dict(
-    base_weights: Union[str, Path],
-    quant_state_dict: Union[str, Path],
+    base_weights: str | Path,
+    quant_state_dict: str | Path,
 ) -> YOLO:
-    """
-    Rebuild a quantized YOLOv10 model shell and load pre-computed quantized weights.
+    """Rebuild a quantized YOLOv10 model shell and load pre-computed quantized weights.
 
     Args:
         base_weights: Path to the floating-point checkpoint used to instantiate the shell.
@@ -162,16 +157,15 @@ def load_qat_model_from_state_dict(
     Returns:
         The restored quantized ``YOLO`` model instance.
     """
-
     model = YOLO(str(base_weights), do_qat=True)
     model.fuse()
 
     model.model.qconfig = torch.ao.quantization.get_default_qat_qconfig()
 
     model.model.model[23].dfl.qconfig = None
-    
+
     model.model.train()
-    
+
     torch.quantization.prepare_qat(model.model, inplace=True)
 
     torch.quantization.convert(model.model, inplace=True)
@@ -184,11 +178,9 @@ def load_qat_model_from_state_dict(
 
     return model
 
-def get_lib_quant_model() -> YOLO:
-    """
-    Load the library-provided quantized model using checkpoints stored relative to this package.
-    """
 
+def get_lib_quant_model() -> YOLO:
+    """Load the library-provided quantized model using checkpoints stored relative to this package."""
     package_root = Path(__file__).resolve().parent.parent
     base_weights = package_root / "pretrained" / "weights" / "best.pt"
     quant_state_dict = package_root / "quant" / "quant_state_dict" / "qat_sttd.pt"
