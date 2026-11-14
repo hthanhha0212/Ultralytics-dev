@@ -1,4 +1,3 @@
-
 # NPU-Friendly YOLOv5
 nc: 80 # number of classes
 scales:

@@ -22,19 +22,19 @@ If you do not have a YAML, pass `--images path\to\dataset\images\train` (expects
 
 ### Key Options
 
-| Flag            | Description                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------- |
-| `--model`       | Path to the trained YOLO `.pt` checkpoint (required).                                       |
-| `--data`        | Dataset YAML path.                                                                          |
-| `--images`      | Alternative to `--data` when only an image directory is available.                          |
-| `--split`       | Dataset split key (`train`, `val`, `test`, etc.).                                           |
-| `--batch`       | Batch size when iterating the dataset.                                                      |
-| `--workers`     | Dataloader workers.                                                                         |
-| `--topk`        | Number of highest-loss images to log.                                                       |
-| `--max-samples` | Optional cap on the number of images processed.                                             |
-| `--half`        | Run the scoring pass in FP16 when CUDA is available.                                        |
-| `--save-csv`    | Path to dump the full ranking as `image,total_loss,box_loss,cls_loss,dfl_loss`.            |
-| `--device`      | Explicit torch device string. Defaults to CUDA if available, otherwise CPU.                 |
+| Flag            | Description                                                                     |
+| --------------- | ------------------------------------------------------------------------------- |
+| `--model`       | Path to the trained YOLO `.pt` checkpoint (required).                           |
+| `--data`        | Dataset YAML path.                                                              |
+| `--images`      | Alternative to `--data` when only an image directory is available.              |
+| `--split`       | Dataset split key (`train`, `val`, `test`, etc.).                               |
+| `--batch`       | Batch size when iterating the dataset.                                          |
+| `--workers`     | Dataloader workers.                                                             |
+| `--topk`        | Number of highest-loss images to log.                                           |
+| `--max-samples` | Optional cap on the number of images processed.                                 |
+| `--half`        | Run the scoring pass in FP16 when CUDA is available.                            |
+| `--save-csv`    | Path to dump the full ranking as `image,total_loss,box_loss,cls_loss,dfl_loss`. |
+| `--device`      | Explicit torch device string. Defaults to CUDA if available, otherwise CPU.     |
 
 The CLI automatically recreates the loss criterion and merges your checkpoint’s stored hyperparameters with the
 defaults to avoid dependency on how the checkpoint was saved. It then logs the top contributors along with their
